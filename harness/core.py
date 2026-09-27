@@ -305,6 +305,10 @@ def _inventory(home: Path, definition: Path) -> dict[str, str]:
     """Strict full-profile checkpoint only while installation is incomplete."""
     result = {}
     for path in home.rglob("*"):
+        # Codex creates disposable tmp/arg0 symlinks during router setup.
+        # They are runtime scratch, not installation-owned profile state.
+        if path.relative_to(home).parts[0] == "tmp":
+            continue
         if path.is_symlink():
             raise InstallError(f"Symlink in managed profile: {path}")
         if path.is_file() and path.name not in {"journal.json", "manifest.json"}:

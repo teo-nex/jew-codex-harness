@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python }}
+      - name: Install Windows timezone data
+        if: runner.os == 'Windows'
+        run: python -m pip install tzdata
       - name: Compile Python sources
         run: python -m compileall -q harness integrations tests server
       - name: Harness unit tests
@@ -52,6 +55,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
+      - name: Install Codex CLI
+        run: npm install -g @openai/codex
       - run: npm ci
       - name: Offline Jev configuration smoke
         run: python ../scripts/smoke_config_offline.py

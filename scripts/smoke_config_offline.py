@@ -30,7 +30,8 @@ def main():
         for name, command in steps:
             result = subprocess.run(command, cwd=repo, env=env, capture_output=True, timeout=45)
             if result.returncode:
-                raise RuntimeError(f"offline configuration step {name} exited {result.returncode}")
+                detail = (result.stderr or result.stdout).decode(errors="replace").strip()[-1200:]
+                raise RuntimeError(f"offline configuration step {name} exited {result.returncode}: {detail}")
             completed.append(name)
         models = json.loads((state / "user-models.json").read_text())
         if sum(model.get("slug") == "jev/auto" for model in models.get("models", [])) != 1:

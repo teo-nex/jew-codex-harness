@@ -20,7 +20,8 @@ class CLITests(unittest.TestCase):
             self.assertEqual(json.loads(output.getvalue())["issues"], ["missing"])
 
     def test_openrouter_never_inherits_ambient_typesafe_key_path(self):
-        with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY_FILE": "/private/typesafe.key"}, clear=True), \
+        with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY_FILE": "/private/typesafe.key",
+                                          "CODEX_HOME": str(Path(tempfile.gettempdir()) / "codex")}, clear=True), \
              mock.patch.object(cli.core, "doctor", return_value={"ready": False, "issues": []}) as doctor, \
              redirect_stdout(io.StringIO()):
             cli.main(["--jev-provider", "openrouter", "doctor"])

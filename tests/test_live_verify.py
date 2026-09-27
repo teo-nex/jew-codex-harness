@@ -51,7 +51,7 @@ class LiveVerifyTests(unittest.TestCase):
             with mock.patch.object(live_verify.shutil, "which", return_value="/usr/bin/codex"), \
                  mock.patch.object(live_verify.subprocess, "run", side_effect=run) as run_mock:
                 result = live_verify.verify_live(Path(home))
-            self.assertTrue(result["ok"])
+            self.assertTrue(result["ok"], result)
             self.assertEqual(run_mock.call_count, 1)
             self.assertNotIn("credential", str(result))
 
@@ -84,7 +84,7 @@ class LiveVerifyTests(unittest.TestCase):
             with mock.patch.object(live_verify.urllib.request, "build_opener") as build:
                 build.return_value.open.return_value.__enter__.return_value = response
                 result = live_verify.verify_decision(root)
-            self.assertTrue(result["ok"])
+            self.assertTrue(result["ok"], result)
             request = build.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, "http://127.0.0.1:4319/ask")
             self.assertNotIn("fixture-local-key", str(result))
@@ -110,7 +110,7 @@ class LiveVerifyTests(unittest.TestCase):
             with mock.patch.object(live_verify.shutil, "which", return_value="codex"), \
                  mock.patch.object(live_verify.subprocess, "run", side_effect=run):
                 result = live_verify.verify_manual(root, "gpt-6-luna")
-            self.assertTrue(result["ok"])
+            self.assertTrue(result["ok"], result)
 
     def test_manual_model_rejects_auto_alias(self):
         self.assertFalse(live_verify.verify_manual(Path("/tmp/profile"), "jev/auto")["ok"])

@@ -318,7 +318,7 @@ test(
         MODEL_ROUTER_SKIP_SERVICE_MANAGER: "1",
       });
       assert.equal(result.status, 0, result.stderr);
-      assert.deepEqual(recorder.calls(), []);
+      assert.deepEqual(recorder.calls(), ["is-active codex-router.service"]);
       assert.equal(existsSync(unitIn(fixture)), true);
     } finally {
       rmSync(fixture, { recursive: true, force: true });
@@ -355,7 +355,7 @@ test(
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(recorder.calls(), [
         "daemon-reload",
-        "stop codex-router.service",
+        "is-active codex-router.service",
         "enable --now codex-router.service",
       ]);
     } finally {

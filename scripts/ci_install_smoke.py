@@ -42,13 +42,15 @@ def _private_synthetic_key(path: Path) -> None:
         "$rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'Read', 'Allow'); "
         "$acl.AddAccessRule($rule); Set-Acl -LiteralPath $p -AclObject $acl"
     )
-    subprocess.run(
+    result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
         env={**os.environ, "JEV_CI_KEY_PATH": str(path)},
-        check=True,
+        check=False,
         capture_output=True,
         text=True,
     )
+    if result.returncode:
+        raise RuntimeError("Windows synthetic key ACL failed: " + result.stderr.strip()[-500:])
 
 
 def _result_object(output: str) -> dict:

@@ -174,7 +174,15 @@ if (command === "render") {
   // process cannot rotate a file it already holds open. Stop first, rotate
   // while nothing holds it, then start: enable --now on an already-running
   // unit would otherwise leave the old descriptor on the renamed inode.
-  systemctl(["stop", unitName], { quiet: true });
+  // A fresh install has no loaded unit. Stop failures still propagate when an
+  // existing unit was active, so an update cannot keep its old log descriptor.
+  let wasActive = false;
+  try {
+    wasActive = systemctl(["is-active", unitName]).trim() === "active";
+  } catch {
+    // Inactive and unknown units return nonzero.
+  }
+  if (wasActive) systemctl(["stop", unitName], { quiet: true });
   rotateLog(LOG_PATH);
   systemctl(["enable", "--now", unitName], { quiet: true });
   process.stdout.write(`${JSON.stringify({ installed: true, path: unitPath })}\n`);

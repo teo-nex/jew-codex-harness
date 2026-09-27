@@ -20,6 +20,10 @@ class InstallCoreTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
+        macos = core.platform_module("macos")
+        platform_patch = mock.patch.object(core, "platform_module", return_value=macos)
+        platform_patch.start()
+        self.addCleanup(platform_patch.stop)
         self.root = Path(self.temp.name)
         if os.name == "nt":
             from harness.platforms.windows import _private_state_dir

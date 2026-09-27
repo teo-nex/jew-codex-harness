@@ -21,7 +21,7 @@ ACTIVE = {"queued", "running"}
 
 
 def state_root():
-    codex_home = Path(os.environ.get("CODEX_HOME", Path.home() / ".codex"))
+    codex_home = Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME") else Path.home() / ".codex"
     configured = os.environ.get("JEV_WORKER_STATE_DIR") or os.environ.get("JEV_PORTABLE_WORKER_STATE")
     if configured is None and os.environ.get("JEV_STATE_DIR"):
         configured = str(Path(os.environ["JEV_STATE_DIR"]) / "workers")

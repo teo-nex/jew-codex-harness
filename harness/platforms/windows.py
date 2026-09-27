@@ -214,7 +214,8 @@ def _private_state_dir(path: Path, create: bool = False):
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                             env=env, capture_output=True, check=False)
     if result.returncode:
-        raise RuntimeError("could not protect router state directory ACL")
+        detail = result.stderr.decode(errors="replace").strip()[-500:]
+        raise RuntimeError("could not protect router state directory ACL: " + detail)
 
 
 def install_service(plan: dict, dry_run: bool = True) -> dict:

@@ -9,7 +9,8 @@ import os
 import uuid
 
 def codex_home():
-    return Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")).expanduser().resolve()
+    configured = os.environ.get("CODEX_HOME")
+    return Path(configured).expanduser().resolve() if configured else (Path.home() / ".codex").resolve()
 
 
 def state_dir():

@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -101,6 +102,7 @@ class LinuxServiceTests(unittest.TestCase):
         self.assertEqual(first["action"], second["action"])
         self.assertFalse(Path(self.plan["state_dir"]).exists())
 
+    @unittest.skipIf(os.name == "nt", "POSIX modes do not describe Windows ACLs")
     def test_state_directory_is_private_and_symlinks_are_rejected(self):
         state = Path(self.plan["state_dir"])
         state.mkdir()
