@@ -29,7 +29,7 @@ class LiveTaskXml(unittest.TestCase):
             created = False
             try:
                 subprocess.run(["schtasks", "/Create", "/TN", task_name,
-                                "/XML", str(definition)], check=True,
+                                "/XML", str(definition), "/RL", "LIMITED"], check=True,
                                capture_output=True, timeout=30)
                 created = True
                 query = subprocess.run(["schtasks", "/Query", "/TN", task_name,
@@ -48,7 +48,9 @@ class LiveTaskXml(unittest.TestCase):
                     for key, value in expected.items():
                         element = root_xml.find(f".//{{{windows.NS}}}{key}")
                         matches[key] = element is not None and element.text == value
-                    self.fail(f"Task Scheduler changed installer-owned fields: {matches}")
+                    run_level = root_xml.find(f".//{{{windows.NS}}}RunLevel")
+                    self.fail(f"Task Scheduler changed installer-owned fields: {matches}; "
+                              f"RunLevel={run_level.text if run_level is not None else None!r}")
             finally:
                 if created:
                     subprocess.run(["schtasks", "/Delete", "/TN", task_name,
