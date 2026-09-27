@@ -32,14 +32,12 @@ class LiveTaskXml(unittest.TestCase):
                                 "/XML", str(definition)], check=True,
                                capture_output=True, timeout=30)
                 created = True
-                changed = subprocess.run(["schtasks", "/Change", "/TN", task_name,
-                                          "/RL", "LIMITED"], capture_output=True,
-                                         text=True, timeout=30, check=False)
-                self.assertEqual(changed.returncode, 0, changed.stderr[-300:])
+                level = windows._task_run_level(task_name)
+                self.assertEqual(level, "Limited")
                 query = subprocess.run(["schtasks", "/Query", "/TN", task_name,
                                         "/XML"], check=True, capture_output=True,
                                        text=True, timeout=30)
-                if not windows._owned_xml(query.stdout, plan):
+                if not windows._owned_xml(query.stdout, plan, level):
                     root_xml = ET.fromstring(query.stdout)
                     expected = {"Description": plan["marker"],
                                 "UserId": plan["owner_sid"],

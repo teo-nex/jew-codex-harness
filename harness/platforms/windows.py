@@ -93,7 +93,7 @@ def _query_xml():
                           capture_output=True, text=True, check=False)
 
 
-def _owned_xml(xml, plan=None):
+def _owned_xml(xml, plan=None, observed_run_level=None):
     try:
         root = ET.fromstring(xml)
         description = root.find(f".//{{{NS}}}Description")
@@ -112,10 +112,13 @@ def _owned_xml(xml, plan=None):
         expected_command = plan["command"][0] if plan else None
         expected_arguments = subprocess.list2cmdline([plan["wrapper_path"]]) if plan else None
         expected_working = plan["repo"] if plan else None
+        limited = (runlevel is not None and runlevel.text == "LeastPrivilege"
+                   and observed_run_level in (None, "Limited")) or (
+                       runlevel is None and observed_run_level == "Limited")
         return (principal is not None and user_id is not None
                 and (plan is None or user_id.text == plan["owner_sid"])
                 and logon is not None and logon.text == "InteractiveToken"
-                and runlevel is not None and runlevel.text == "LeastPrivilege"
+                and limited
                 and command is not None and arguments is not None and working is not None
                 and command.text and arguments.text and working.text
                 and (plan is None or (command.text == expected_command
@@ -136,10 +139,26 @@ def _active():
     return result.returncode == 0
 
 
+def _task_run_level(task_name=SERVICE_ID):
+    """Read the registered task's effective run level when XML omits defaults."""
+    script = ("$t=Get-ScheduledTask -TaskName $env:JEV_TASK_NAME -ErrorAction SilentlyContinue; "
+              "if(-not $t){exit 2}; [Console]::Out.Write($t.Principal.RunLevel.ToString())")
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            env={**os.environ, "JEV_TASK_NAME": task_name},
+            capture_output=True, text=True, timeout=45, check=False)
+        return result.stdout.strip() if result.returncode == 0 else None
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+
+
 def service_status(plan: dict) -> dict:
     query = _query_xml()
     installed = query.returncode == 0
-    return {"installed": installed, "owned": _owned_xml(query.stdout, plan) if installed else False,
+    level = _task_run_level() if installed else None
+    return {"installed": installed,
+            "owned": _owned_xml(query.stdout, plan, level) if installed else False,
             "active": _active() if installed else False,
             "port_occupied": _port_occupied(int(plan["port"])),
             "service_id": SERVICE_ID}
@@ -246,11 +265,7 @@ def install_service(plan: dict, dry_run: bool = True) -> dict:
         definition_path.write_text(_render(plan), encoding="utf-8")
         subprocess.run(["schtasks", "/Create", "/TN", SERVICE_ID, "/XML",
                         plan["definition_path"], "/F"], check=True)
-        # schtasks rejects /RL beside /XML on some Windows versions. Set the
-        # limited run level after registration and verify it below.
-        subprocess.run(["schtasks", "/Change", "/TN", SERVICE_ID,
-                        "/RL", "LIMITED"], check=True)
-        if not _owned_xml(_query_xml().stdout, plan):
+        if not _owned_xml(_query_xml().stdout, plan, _task_run_level()):
             raise RuntimeError("scheduled task differs after limited run-level registration")
         subprocess.run(["schtasks", "/Run", "/TN", SERVICE_ID], check=True)
     return {"action": "install_and_start", "dry_run": dry_run, **status}

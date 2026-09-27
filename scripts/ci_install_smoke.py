@@ -120,8 +120,10 @@ def _service_diagnostic(profile: Path, port: int) -> None:
         plan = windows.plan_service(REPO, profile, profile / "jev-harness",
                                     {"JEV_LISTEN_PORT": str(port), "JEV_LADDER_MODE": "native"})
         query = windows._query_xml()
+        observed_level = windows._task_run_level() if query.returncode == 0 else None
         fields = {"task_query_exit": query.returncode,
-                  "owned": windows._owned_xml(query.stdout, plan) if query.returncode == 0 else False,
+                  "observed_run_level": observed_level,
+                  "owned": windows._owned_xml(query.stdout, plan, observed_level) if query.returncode == 0 else False,
                   "active": windows._active() if query.returncode == 0 else False}
         if query.returncode == 0:
             root = ET.fromstring(query.stdout)

@@ -32,6 +32,12 @@ class WindowsServiceTests(unittest.TestCase):
         altered = dict(self.plan, command=["C:\\foreign\\python.exe", self.plan["command"][1]])
         self.assertFalse(windows._owned_xml(task, altered))
 
+    def test_omitted_run_level_requires_a_live_limited_result(self):
+        task = windows._render(self.plan).replace("<RunLevel>LeastPrivilege</RunLevel>", "")
+        self.assertFalse(windows._owned_xml(task, self.plan))
+        self.assertTrue(windows._owned_xml(task, self.plan, "Limited"))
+        self.assertFalse(windows._owned_xml(task, self.plan, "Highest"))
+
     def test_router_state_dir_is_bound_to_selected_profile(self):
         with self.assertRaisesRegex(ValueError, "fixed by the selected Codex profile"):
             windows.plan_service(self.root, self.root / "codex", self.root / "state",
