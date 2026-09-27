@@ -204,7 +204,23 @@ def main() -> int:
                 phase = "not_created"
                 if journal_path.is_file():
                     try:
-                        phase = json.loads(journal_path.read_text(encoding="utf-8")).get("phase", "invalid")
+                        saved = json.loads(journal_path.read_text(encoding="utf-8"))
+                        phase = saved.get("phase", "invalid")
+                        if "owned" in saved:
+                            from harness.core import _inventory
+                            try:
+                                actual = _inventory(profile, Path(saved["definition_path"]))
+                                before = saved["owned"]
+                                changed = sorted(name for name in actual.keys() | before.keys()
+                                                 if actual.get(name) != before.get(name))
+                                print(json.dumps({"diagnostic": "checkpoint_paths",
+                                                  "changed": changed[:20],
+                                                  "total_changed": len(changed)}),
+                                      file=sys.stderr, flush=True)
+                            except (OSError, RuntimeError, ValueError) as diagnostic_error:
+                                print(json.dumps({"diagnostic": "checkpoint_inventory_error",
+                                                  "error": str(diagnostic_error)[:300]}),
+                                      file=sys.stderr, flush=True)
                     except (OSError, ValueError):
                         phase = "unreadable"
                 print(json.dumps({"diagnostic": "installer_checkpoint",
