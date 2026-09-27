@@ -18,6 +18,7 @@ class WindowsServiceTests(unittest.TestCase):
 
     def test_task_and_wrapper_contain_no_secret_values(self):
         task = windows._render(self.plan)
+        self.assertFalse(task.startswith("<?xml"))
         wrapper = windows._wrapper(self.plan)
         self.assertTrue(windows._owned_xml(task))
         self.assertIn("run-router.py", task)

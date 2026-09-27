@@ -165,7 +165,9 @@ def _render(plan):
     ET.SubElement(action, "Command").text = plan["command"][0]
     ET.SubElement(action, "Arguments").text = subprocess.list2cmdline([plan["wrapper_path"]])
     ET.SubElement(action, "WorkingDirectory").text = plan["repo"]
-    return ET.tostring(task, encoding="unicode", xml_declaration=True)
+    # schtasks rejects an encoding switch in the declaration of a UTF-8
+    # task file. Without a declaration it reads the UTF-8 bytes directly.
+    return ET.tostring(task, encoding="unicode", xml_declaration=False)
 
 
 def _wrapper(plan):

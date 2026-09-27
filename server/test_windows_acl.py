@@ -46,14 +46,16 @@ class WindowsCredentialAcl(unittest.TestCase):
             self.assertTrue(local_runtime.private_regular(path.stat(), path))
             with mock.patch.object(local_runtime, "AUTH_PATH", str(path)):
                 self.assertEqual(local_runtime.local_secret(), "synthetic-key")
-            with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY_FILE": str(path)}, clear=True):
+            with mock.patch.dict(os.environ, {"JEV_DECISION_PROVIDER": "typesafe",
+                                              "TYPESAFE_API_KEY_FILE": str(path)}):
                 self.assertEqual(jev_server.load_key(), "synthetic-key")
 
             self._set_acl(path, shared=True)
             self.assertFalse(local_runtime.private_regular(path.stat(), path))
             with mock.patch.object(local_runtime, "AUTH_PATH", str(path)):
                 self.assertEqual(local_runtime.local_secret(), "")
-            with mock.patch.dict(os.environ, {"TYPESAFE_API_KEY_FILE": str(path)}, clear=True):
+            with mock.patch.dict(os.environ, {"JEV_DECISION_PROVIDER": "typesafe",
+                                              "TYPESAFE_API_KEY_FILE": str(path)}):
                 with self.assertRaises(PermissionError):
                     jev_server.load_key()
 
