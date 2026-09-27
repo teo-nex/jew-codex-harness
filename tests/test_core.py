@@ -28,6 +28,12 @@ class InstallCoreTests(unittest.TestCase):
         if os.name == "nt":
             from harness.platforms.windows import _private_state_dir
             _private_state_dir(self.root, create=False)
+            # These tests exercise the macOS adapter's installer state machine
+            # on every host. ACL behavior is covered by the Windows adapter;
+            # a mocked subprocess in this fixture cannot validate real ACLs.
+            acl_patch = mock.patch.object(core, "protected_file", side_effect=lambda path, _label: Path(path).resolve(strict=True))
+            acl_patch.start()
+            self.addCleanup(acl_patch.stop)
         self.home = self.root / "codex"
         self.ladder = self.root / "ladder.json"
         self.omni = self.root / "omni.json"
@@ -73,6 +79,7 @@ class InstallCoreTests(unittest.TestCase):
         self.assertFalse(self._doctor()["ready"])
         self.assertIn("reviewed migration", " ".join(self._doctor()["issues"]))
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits do not validate Windows ACLs")
     def test_doctor_never_displays_secret(self):
         self.key.chmod(0o644)
         report = self._doctor()

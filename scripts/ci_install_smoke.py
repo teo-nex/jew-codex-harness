@@ -96,6 +96,31 @@ def _check(name: str, result: dict, expected: dict[str, object]) -> None:
     print(json.dumps({"stage": name, "status": "passed"}), flush=True)
 
 
+def _service_diagnostic(profile: Path) -> None:
+    # CI uses only a synthetic key; keep failure details bounded and never
+    # dump configuration files or credential material.
+    if sys.platform == "linux":
+        for command in (
+            ["systemctl", "--user", "show", "jev-codex-harness-router.service",
+             "--property=ActiveState,SubState,ExecMainStatus,NRestarts"],
+            ["journalctl", "--user", "-u", "jev-codex-harness-router.service",
+             "-n", "12", "--no-pager", "-o", "cat"],
+        ):
+            try:
+                result = subprocess.run(command, capture_output=True, text=True, timeout=8, check=False)
+                print(json.dumps({"diagnostic": command[0],
+                                  "output": (result.stdout or result.stderr)[-1500:]}),
+                      file=sys.stderr, flush=True)
+            except (OSError, subprocess.TimeoutExpired):
+                pass
+    elif os.name == "nt":
+        log = profile / "codex-router/router.log"
+        if log.is_file():
+            print(json.dumps({"diagnostic": "router_log_tail",
+                              "output": log.read_text(encoding="utf-8", errors="replace")[-1800:]}),
+                  file=sys.stderr, flush=True)
+
+
 def main() -> int:
     if os.environ.get("GITHUB_ACTIONS", "").lower() != "true":
         print("CI_INSTALL_SMOKE_REQUIRES_GITHUB_HOSTED_RUNNER", file=sys.stderr)
@@ -163,6 +188,7 @@ def main() -> int:
             failed = True
             print(json.dumps({"stage": stage, "status": "failed",
                               "error": str(exc)[:2000]}), file=sys.stderr, flush=True)
+            _service_diagnostic(profile)
         finally:
             if installed:
                 try:

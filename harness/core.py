@@ -685,7 +685,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
     if ctx["platform"].service_status(plan)["installed"] or ctx["platform"].service_status(plan)["active"]:
         raise InstallError("Service changed after preflight; refusing install")
     home.mkdir(parents=True, exist_ok=True, mode=0o700)
-    if os.name == "nt":
+    if os.name == "nt" and (os_name or sys.platform) in ("windows", "win32"):
         # Protect the new profile before writing the journal or any provider
         # metadata. The platform adapter applies the same ACL to its state dir.
         ctx["platform"]._private_state_dir(home, create=False)
