@@ -1,0 +1,17 @@
+.runtime/
+.venv/
+node_modules/
+router/node_modules/
+router/.venv/
+__pycache__/
+*.pyc
+.env
+.env.*
+*.key
+*.pem
+*.p12
+*.log
+*.jsonl
+harness.local.toml
+*.bak
+.DS_Store

@@ -1,0 +1,10 @@
+{
+  "plus_connection_id": "REPLACE_WITH_PLUS_CONNECTION_ID",
+  "gemini_connection_ids": [
+    "REPLACE_WITH_VERIFIED_GEMINI_CONNECTION_ID"
+  ],
+  "gemini_model": "REPLACE_WITH_GEMINI_MODEL_ID",
+  "glm_model": "REPLACE_WITH_FIRST_FALLBACK_MODEL_ID",
+  "deepseek_model": "REPLACE_WITH_SECOND_FALLBACK_MODEL_ID",
+  "main_model": "REPLACE_WITH_MAIN_MODEL_ID"
+}
