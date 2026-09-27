@@ -81,7 +81,8 @@ class LiveVerifyTests(unittest.TestCase):
             response = mock.MagicMock(status=200)
             response.read.return_value = json.dumps({"model": "jev-1.13.0", "answers": {
                 "marker": {"type": "choice", "choice": "present"}}}).encode()
-            with mock.patch.object(live_verify.urllib.request, "build_opener") as build:
+            with mock.patch.object(live_verify.core, "protected_file", return_value=key), \
+                 mock.patch.object(live_verify.urllib.request, "build_opener") as build:
                 build.return_value.open.return_value.__enter__.return_value = response
                 result = live_verify.verify_decision(root)
             self.assertTrue(result["ok"], result)

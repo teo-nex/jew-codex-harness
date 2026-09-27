@@ -336,7 +336,7 @@ try {
   if ((Get-InstallStep "node-deps") -eq "skip") {
     Write-Host "Node dependencies already match package-lock.json; skipping npm ci."
   } else {
-    & npm ci --omit=dev
+    & npm.cmd ci --omit=dev
     if ($LASTEXITCODE -ne 0) { throw "npm dependency installation failed." }
     & node src/install-plan.mjs record node-deps
     if ($LASTEXITCODE -ne 0) { throw "Recording the Node dependency state failed." }

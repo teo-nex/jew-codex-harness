@@ -82,7 +82,7 @@ def _run_cli(command: str, profile: Path, key: Path, port: int, env: dict[str, s
     completed = subprocess.run(argv, cwd=REPO, env=env, text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                timeout=timeout, check=False)
-    if completed.returncode:
+    if completed.returncode and command != "verify":
         # This job has only a synthetic key. Keep logs bounded for CI review.
         tail = completed.stdout[-1800:].strip()
         raise RuntimeError(f"{command} exited {completed.returncode}: {tail}")
@@ -146,8 +146,8 @@ def main() -> int:
             for attempt in range(20):
                 try:
                     result = _run_cli(stage, profile, key, port, env, timeout=20)
-                except RuntimeError:
-                    result = {}
+                except RuntimeError as exc:
+                    result = {"verify_error": str(exc)[-1000:]}
                 if all(result.get(field) is True for field in REQUIRED_VERIFY):
                     break
                 if attempt < 19:

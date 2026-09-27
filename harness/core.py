@@ -323,6 +323,7 @@ _MANAGED_FILES = ("config.toml", "hooks.json", "AGENTS.md", "jev-global/ui.mjs",
                   "skills/jev-worker-orchestration/SKILL.md", "jev-harness/ladder-config.json")
 _MUTABLE_HOST_FILES = {"config.toml", "hooks.json", "AGENTS.md"}
 _ROLLBACK_PHASES = {"complete", "service_removed", "router_disabled", "router_removed"}
+_LIVE_INSTALL_PHASES = {"manifest_written", "service_installed"}
 
 
 def _owned_payload(home: Path, repo: Path, relative: str) -> object:
@@ -460,7 +461,8 @@ def _read_journal(home: Path) -> dict:
 
 def _check_checkpoint(home: Path, plan: dict, journal: dict) -> None:
     """Refuse an interrupted install if any managed bytes changed since its checkpoint."""
-    inventory = (_managed_inventory if journal["phase"] in _ROLLBACK_PHASES else _inventory)
+    inventory = (_managed_inventory if journal["phase"] in _ROLLBACK_PHASES | _LIVE_INSTALL_PHASES
+                 else _inventory)
     expected = (_expected_managed(journal, home) if journal["phase"] in _ROLLBACK_PHASES
                 else journal.get("owned"))
     if inventory(home, Path(plan["definition_path"])) != expected:
@@ -502,7 +504,8 @@ def _check_router_provenance(home: Path, repo: Path) -> None:
 def _checkpoint(state: Path, home: Path, plan: dict, journal: dict, phase: str) -> None:
     previous = journal.copy()
     journal["phase"] = phase
-    journal["owned"] = _inventory(home, Path(plan["definition_path"]))
+    journal["owned"] = (_managed_inventory if phase in _LIVE_INSTALL_PHASES else _inventory)(
+        home, Path(plan["definition_path"]))
     definition = journal.get("router_definition_path")
     if definition:
         journal["router_definition_sha256"] = _digest(Path(definition))
@@ -578,8 +581,8 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
         ("skill_written", lambda: _atomic(home / "skills/jev-worker-orchestration/SKILL.md",
                                            (repo / "integrations/jev-worker-orchestration-SKILL.md").read_bytes())),
         ("agents_written", write_agents),
-        ("service_installed", install_service),
         ("manifest_written", write_manifest),
+        ("service_installed", install_service),
     ]
     phases = ["router_ready"] + [name for name, _ in steps]
     if journal["phase"] not in phases:
@@ -625,10 +628,10 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
         status = ctx_saved["platform"].service_status(service)
         if (status["installed"] or status["active"]) and not status.get("owned"):
             raise InstallError("Installed service ownership changed; refusing continuation")
-        if saved["phase"] not in {"service_installed", "manifest_written", "complete"} \
+        if saved["phase"] not in {"service_installed", "complete"} \
                 and (status["installed"] or status["active"]):
             raise InstallError("Service appeared before its installation checkpoint; exact review required")
-        if saved["phase"] in {"service_installed", "manifest_written"} \
+        if saved["phase"] == "service_installed" \
                 and not status["installed"]:
             raise InstallError("Owned service disappeared after its installation checkpoint")
         router_definition = _router_service_definition(os_name)

@@ -151,6 +151,23 @@ class InstallCoreTests(unittest.TestCase):
         self.assertFalse(any("chatgpt-session.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("synthetic" in str(call) for call in process.call_args_list))
 
+    def test_service_runtime_write_does_not_invalidate_owned_checkpoint(self):
+        def start_service(_plan, *, dry_run):
+            self.assertFalse(dry_run)
+            runtime = self.home / "codex-router/runtime-metrics.json"
+            runtime.parent.mkdir(parents=True, exist_ok=True)
+            runtime.write_text('{"started": true}')
+
+        with mock.patch.object(core, "doctor", return_value={"ready": True, "issues": []}), \
+             mock.patch.object(core, "_port_free", return_value=True), \
+             mock.patch.object(core, "_router_service_definition", return_value=None), \
+             mock.patch.object(core.subprocess, "run"), \
+             mock.patch("harness.platforms.macos.service_status", return_value={"installed": False, "active": False}), \
+             mock.patch("harness.platforms.macos.install_service", side_effect=start_service):
+            result = core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
+        self.assertTrue(result["installed"])
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
+
     def test_native_install_omits_external_credentials_and_ladder_file(self):
         with mock.patch.object(core, "doctor", return_value={"ready": True, "issues": []}), \
              mock.patch.object(core, "_port_free", return_value=True), \
@@ -286,7 +303,7 @@ class InstallCoreTests(unittest.TestCase):
              mock.patch("harness.platforms.macos.install_service", side_effect=RuntimeError("synthetic service failure")):
             with self.assertRaisesRegex(RuntimeError, "synthetic service failure"):
                 core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
-        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "agents_written")
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "manifest_written")
         with mock.patch.object(core, "_router_service_definition", return_value=None), \
              mock.patch.object(core.subprocess, "run") as process, \
              mock.patch("harness.platforms.macos.service_status", return_value={"installed": False, "active": False}), \

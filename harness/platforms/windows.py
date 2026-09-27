@@ -209,7 +209,9 @@ def _private_state_dir(path: Path, create: bool = False):
               "$prop=[Security.AccessControl.PropagationFlags]::None; "
               "$allow=[Security.AccessControl.AccessControlType]::Allow; "
               "$full=[Security.AccessControl.FileSystemRights]::FullControl; "
-              "foreach($id in @($sid.Value,'S-1-5-18','S-1-5-32-544')) { "
+              "$ids=@($sid,[Security.Principal.SecurityIdentifier]::new('S-1-5-18'),"
+              "[Security.Principal.SecurityIdentifier]::new('S-1-5-32-544')); "
+              "foreach($id in $ids) { "
               "$rule=[Security.AccessControl.FileSystemAccessRule]::new($id,$full,$inherit,$prop,$allow); "
               "$acl.AddAccessRule($rule) }; [System.IO.Directory]::SetAccessControl($p,$acl) } "
               "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }")
