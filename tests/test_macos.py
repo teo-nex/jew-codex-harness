@@ -1,3 +1,4 @@
+import os
 import plistlib
 import tempfile
 import unittest
@@ -37,6 +38,20 @@ class MacServiceTests(unittest.TestCase):
                 macos, "_port_occupied", return_value=True):
             with self.assertRaises(RuntimeError):
                 macos.install_service(self.plan)
+
+    @unittest.skipIf(os.name == "nt", "Creating symlinks requires Windows privileges")
+    def test_dangling_definition_symlink_is_refused_without_writing_target(self):
+        path = Path(self.plan["definition_path"])
+        target = self.root / "foreign.plist"
+        path.symlink_to(target)
+        with patch.object(macos, "_active", return_value=False), patch.object(
+                macos, "_port_occupied", return_value=False), patch.object(
+                macos.subprocess, "run") as run:
+            with self.assertRaises(FileExistsError):
+                macos.install_service(self.plan, dry_run=False)
+        run.assert_not_called()
+        self.assertFalse(target.exists())
+        self.assertTrue(path.is_symlink())
 
     def test_shared_state_directory_is_refused(self):
         state = Path(self.plan["state_dir"])

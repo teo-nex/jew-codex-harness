@@ -13,6 +13,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import uuid
 
@@ -154,11 +155,14 @@ def _run(task_id):
                "--skip-git-repo-check", "--ephemeral", "--json", "--cd", task["cwd"],
                "-c", "mcp_servers.jev-workers.enabled=false", "--output-last-message", str(answer), "-"]
     _write(directory / "state.json", {"state": "running", "started_at": time.time()})
+    process = None
     try:
-        process = subprocess.Popen(command, stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
-                                   stderr=subprocess.DEVNULL, cwd=task["cwd"])
-        process.stdin.write(prompt.encode())
-        process.stdin.close()
+        # A pipe write can block before the timeout loop if Codex never reads.
+        with tempfile.TemporaryFile() as input_file:
+            input_file.write(prompt.encode())
+            input_file.seek(0)
+            process = subprocess.Popen(command, stdin=input_file, stdout=subprocess.DEVNULL,
+                                       stderr=subprocess.DEVNULL, cwd=task["cwd"])
         deadline = time.monotonic() + task["budget"]["max_seconds"]
         while process.poll() is None:
             if (directory / "cancel.request").exists():
@@ -179,6 +183,10 @@ def _run(task_id):
                                          "ended_at": time.time()})
     except Exception:
         _write(directory / "state.json", {"state": "failed", "reason": "worker_runner_error", "ended_at": time.time()})
+    finally:
+        if process is not None and process.poll() is None:
+            process.kill()
+            process.wait()
 
 
 def status(task_id):

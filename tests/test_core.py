@@ -55,6 +55,27 @@ class InstallCoreTests(unittest.TestCase):
     def test_doctor_accepts_clean_profile(self):
         self.assertTrue(self._doctor()["ready"])
 
+    def test_prepare_overrides_inherited_router_identity(self):
+        inherited = {"MODEL_ROUTER_STATE_DIR": str(self.root / "foreign-state"),
+                     "MODEL_ROUTER_TARGET": "claude"}
+        with mock.patch.dict(os.environ, inherited), mock.patch.object(core.subprocess, "run") as run:
+            core.prepare(REPO, self.home, "macos")
+        env = run.call_args.kwargs["env"]
+        self.assertEqual(env["MODEL_ROUTER_STATE_DIR"], env["CODEX_ROUTER_STATE_DIR"])
+        self.assertEqual(env["MODEL_ROUTER_TARGET"], "codex")
+        self.assertTrue(Path(env["MODEL_ROUTER_STATE_DIR"]).is_relative_to(Path(env["CODEX_HOME"])))
+
+    def test_service_environment_selects_the_profile_on_every_platform(self):
+        from harness.platforms import linux, macos, windows
+        from server.local_runtime import resolve_runtime_paths
+        inherited = {"MODEL_ROUTER_STATE_DIR": str(self.root / "foreign-state"),
+                     "MODEL_ROUTER_TARGET": "claude"}
+        for module in (linux, macos, windows):
+            with self.subTest(platform=module.__name__):
+                env = {**inherited, **module._environment(self.home, self.home / "jev-harness", {})}
+                self.assertEqual(resolve_runtime_paths(env)[2], str(self.home / "codex-router"))
+                self.assertEqual(env["MODEL_ROUTER_TARGET"], "codex")
+
     def test_doctor_accepts_native_mode_without_external_gateway(self):
         with mock.patch.object(core, "_port_free", return_value=True), \
              mock.patch.object(core, "_router_service_definition", return_value=None), \
@@ -131,7 +152,9 @@ class InstallCoreTests(unittest.TestCase):
         self.assertIn("outside the source repository", " ".join(report["issues"]))
 
     def test_fresh_install_records_owned_files_and_preserves_model(self):
-        with mock.patch.object(core, "doctor", return_value={"ready": True, "issues": []}), \
+        with mock.patch.dict(os.environ, {"MODEL_ROUTER_STATE_DIR": str(self.root / "foreign"),
+                                         "MODEL_ROUTER_TARGET": "claude"}), \
+             mock.patch.object(core, "doctor", return_value={"ready": True, "issues": []}), \
              mock.patch.object(core, "_port_free", return_value=True), \
              mock.patch.object(core, "_router_service_definition", return_value=None), \
              mock.patch.object(core.subprocess, "run") as process, \
@@ -157,6 +180,10 @@ class InstallCoreTests(unittest.TestCase):
         self.assertTrue(any("configure-auth.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("chatgpt-session.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("synthetic" in str(call) for call in process.call_args_list))
+        for call in process.call_args_list:
+            self.assertEqual(Path(call.kwargs["env"]["MODEL_ROUTER_STATE_DIR"]).resolve(),
+                             (self.home / "codex-router").resolve())
+            self.assertEqual(call.kwargs["env"]["MODEL_ROUTER_TARGET"], "codex")
 
     def test_service_runtime_write_does_not_invalidate_owned_checkpoint(self):
         def start_service(_plan, *, dry_run):

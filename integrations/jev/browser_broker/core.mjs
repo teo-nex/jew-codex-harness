@@ -66,8 +66,11 @@ export async function browserTask(client, decide, args) {
   const opened = requireResult(await client.call('browser_new_tab', { url: start.href }), 'browser_new_tab');
   const tabId = opened.tabId || opened.activeTabId;
   if (typeof tabId !== 'string' || !tabId) throw new Error('browser_new_tab: missing tabId');
-  await client.call('browser_wait_for', { tabId, condition: 'load', timeoutMs: 5000 });
+  const loaded = await client.call('browser_wait_for', { tabId, condition: 'load', timeoutMs: 5000 });
   const first = requireResult(await client.call('browser_read_page', { tabId }), 'browser_read_page');
+  if (loaded?.ok !== true || httpUrl(first.url)?.href !== start.href)
+    return { status: 'unverified', reason: 'initial_page_unverified', action,
+      tab_id: tabId, page: shortPage(first, expectedText), jev_usage: opening.usage };
   if (action === 'read' || action === 'navigate')
     return { status: expectedText && !String(first.text ?? '').includes(expectedText) ? 'unverified' : 'verified',
       action, tab_id: tabId, page: shortPage(first, expectedText), jev_usage: opening.usage };

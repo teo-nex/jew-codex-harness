@@ -168,18 +168,19 @@ test("guided Windows setup forwards the selected client target to the installer"
 });
 
 test("OpenClaw installers enforce its Node matrix before dependency or catalog work", () => {
+  function assertBefore(source, earlier, later) {
+    const before = source.indexOf(earlier);
+    const after = source.indexOf(later);
+    assert.notEqual(before, -1, `Missing preflight command: ${earlier}`);
+    assert.notEqual(after, -1, `Missing downstream command: ${later}`);
+    assert.ok(before < after, `${earlier} must run before ${later}`);
+  }
   const posixInstall = withoutComments(readScript("bin", "install"));
-  assert.ok(
-    posixInstall.indexOf("openclaw-install.mjs\" preflight") < posixInstall.indexOf("npm ci --omit=dev"),
-  );
+  assertBefore(posixInstall, "openclaw-install.mjs\" preflight", "npm ci --omit=dev");
   const windowsInstall = withoutComments(readScript("install.ps1"));
-  assert.ok(
-    windowsInstall.indexOf("openclaw-install.mjs\") preflight") < windowsInstall.indexOf("npm ci --omit=dev"),
-  );
+  assertBefore(windowsInstall, "openclaw-install.mjs\") preflight", "npm.cmd ci --omit=dev");
   const enable = withoutComments(readScript("bin", "enable"));
-  assert.ok(
-    enable.indexOf("openclaw-install.mjs preflight") < enable.indexOf("provider-selection.mjs ensure-configured"),
-  );
+  assertBefore(enable, "openclaw-install.mjs preflight", "provider-selection.mjs ensure-configured");
 });
 
 test("Windows doctor repair forwards the active client target", () => {

@@ -39,6 +39,8 @@ def _environment(codex_home, state_dir, env):
     if mode == "native" and any(key in env for key in ("JEV_LADDER_CONFIG", "JEV_LADDER_STATE", "JEV_OMNIROUTE_AUTH_FILE")):
         raise ValueError("native mode must not configure an external provider ladder")
     values = {"CODEX_HOME": str(codex_home),
+              "MODEL_ROUTER_TARGET": "codex",
+              "MODEL_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "CODEX_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "JEV_LISTEN_PORT": str(env.get("JEV_LISTEN_PORT", "4321")),
               "JEV_LADDER_MODE": mode, "JEV_DECISION_PROVIDER": provider}
