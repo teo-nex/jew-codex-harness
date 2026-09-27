@@ -29,6 +29,9 @@ Ubuntu, macOS, and Windows:
 - Uses **no live credentials** and **no repository secrets**. Dependency setup
   still downloads packages from the public registries used by the installer.
 - Refuses self-hosted runners. It creates a synthetic key used only for local preflight and runs on a disposable GitHub-hosted VM.
+- On Windows, the base router can retain its log after the owned Jev task is
+  rolled back. CI leaves that synthetic profile for disposal with the hosted
+  VM instead of force-deleting a live router's files.
 
 ### Repository hygiene (`repository-hygiene`)
 The repository-hygiene lane rejects tracked runtime/configuration state,
@@ -52,7 +55,7 @@ After a green GitHub-hosted run, CI would prove only the following properties:
 2. **Router integrity:** Router dependencies install cleanly under Node 22.19; TypeScript/type checks pass; routing and transport failure unit tests pass.
 3. **Offline configuration generation:** Offline provider setup, model registry, local transport key generation, and catalog refresh succeed in a temporary, isolated profile directory.
 4. **Clean repository hygiene & packaging:** No secrets, credentials, logs, or runtime state are tracked; clean release archives build deterministically.
-5. **Install smoke mechanics:** The real installer completes in a fresh profile, owned files and service start, loopback `/health` responds, and owned rollback succeeds on each runner OS. The synthetic key cannot authenticate a live provider request. Native session sharing remains pending explicit owner opt-in.
+5. **Install smoke mechanics:** The real installer completes in a fresh profile, owned files and service start, loopback `/health` responds, and the owned Jev service is rolled back on each runner OS. On Windows, the base router and synthetic profile are retained until the hosted VM is disposed because exact ownership of that router task has not been proven. The synthetic key cannot authenticate a live provider request. Native session sharing remains pending explicit owner opt-in.
 
 Only a green Actions run for the published commit is cross-platform offline
 installation evidence. A red job is an installation failure to investigate,

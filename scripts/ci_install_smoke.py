@@ -8,6 +8,7 @@ The service and router still use their real platform adapters.
 from __future__ import annotations
 
 import json
+import contextlib
 import os
 import socket
 import subprocess
@@ -161,7 +162,13 @@ def main() -> int:
         return 2
 
     stage = "setup"
-    with tempfile.TemporaryDirectory(prefix="jev-install-ci-") as scratch:
+    # Windows rollback removes the owned Jev task but deliberately retains the
+    # base router when its Task Scheduler ownership cannot be proven. That
+    # process may still hold router.log open. Keep the synthetic profile until
+    # the disposable GitHub-hosted VM is destroyed; never force-delete it.
+    temporary = (contextlib.nullcontext(tempfile.mkdtemp(prefix="jev-install-ci-"))
+                 if os.name == "nt" else tempfile.TemporaryDirectory(prefix="jev-install-ci-"))
+    with temporary as scratch:
         root = Path(scratch)
         home = root / "home"
         home.mkdir(mode=0o700)
@@ -226,6 +233,10 @@ def main() -> int:
                     stage = "rollback"
                     result = _run_cli(stage, profile, key, port, env, timeout=180)
                     _check(stage, result, {"service_removed": True})
+                    print(json.dumps({"stage": "rollback_scope",
+                                      "base_router_removed": result.get("router_removed") is True,
+                                      "profile_disposal": "hosted_vm" if os.name == "nt" else "temporary_directory"}),
+                          flush=True)
                 except (OSError, RuntimeError, subprocess.TimeoutExpired) as exc:
                     failed = True
                     print(json.dumps({"stage": "rollback", "status": "failed",
