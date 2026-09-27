@@ -96,7 +96,7 @@ def _check(name: str, result: dict, expected: dict[str, object]) -> None:
     print(json.dumps({"stage": name, "status": "passed"}), flush=True)
 
 
-def _service_diagnostic(profile: Path) -> None:
+def _service_diagnostic(profile: Path, port: int) -> None:
     # CI uses only a synthetic key; keep failure details bounded and never
     # dump configuration files or credential material.
     if sys.platform == "linux":
@@ -114,6 +114,35 @@ def _service_diagnostic(profile: Path) -> None:
             except (OSError, subprocess.TimeoutExpired):
                 pass
     elif os.name == "nt":
+        sys.path.insert(0, str(REPO))
+        from harness.platforms import windows
+        from xml.etree import ElementTree as ET
+        plan = windows.plan_service(REPO, profile, profile / "jev-harness",
+                                    {"JEV_LISTEN_PORT": str(port), "JEV_LADDER_MODE": "native"})
+        query = windows._query_xml()
+        fields = {"task_query_exit": query.returncode,
+                  "owned": windows._owned_xml(query.stdout, plan) if query.returncode == 0 else False,
+                  "active": windows._active() if query.returncode == 0 else False}
+        if query.returncode == 0:
+            root = ET.fromstring(query.stdout)
+            namespace = {"t": windows.NS}
+            expected = {"Description": plan["marker"], "UserId": plan["owner_sid"],
+                        "LogonType": "InteractiveToken", "RunLevel": "LeastPrivilege",
+                        "Command": plan["command"][0],
+                        "Arguments": subprocess.list2cmdline([plan["wrapper_path"]]),
+                        "WorkingDirectory": plan["repo"]}
+            for key, value in expected.items():
+                element = root.find(f".//t:{key}", namespace)
+                fields[key + "_matches"] = element is not None and element.text == value
+                if key in {"LogonType", "RunLevel"} and element is not None:
+                    fields[key] = element.text
+        status = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command",
+             "$t=Get-ScheduledTaskInfo -TaskName 'JevCodexHarnessRouter' -ErrorAction SilentlyContinue; "
+             "if($t){[pscustomobject]@{LastTaskResult=$t.LastTaskResult} | ConvertTo-Json -Compress}"],
+            capture_output=True, text=True, timeout=12, check=False)
+        fields["task_last_result"] = status.stdout.strip()[:120]
+        print(json.dumps({"diagnostic": "windows_task", **fields}), file=sys.stderr, flush=True)
         log = profile / "codex-router/router.log"
         if log.is_file():
             print(json.dumps({"diagnostic": "router_log_tail",
@@ -188,7 +217,7 @@ def main() -> int:
             failed = True
             print(json.dumps({"stage": stage, "status": "failed",
                               "error": str(exc)[:2000]}), file=sys.stderr, flush=True)
-            _service_diagnostic(profile)
+            _service_diagnostic(profile, port)
         finally:
             if installed:
                 try:
