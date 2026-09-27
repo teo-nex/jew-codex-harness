@@ -29,9 +29,13 @@ class LiveTaskXml(unittest.TestCase):
             created = False
             try:
                 subprocess.run(["schtasks", "/Create", "/TN", task_name,
-                                "/XML", str(definition), "/RL", "LIMITED"], check=True,
+                                "/XML", str(definition)], check=True,
                                capture_output=True, timeout=30)
                 created = True
+                changed = subprocess.run(["schtasks", "/Change", "/TN", task_name,
+                                          "/RL", "LIMITED"], capture_output=True,
+                                         text=True, timeout=30, check=False)
+                self.assertEqual(changed.returncode, 0, changed.stderr[-300:])
                 query = subprocess.run(["schtasks", "/Query", "/TN", task_name,
                                         "/XML"], check=True, capture_output=True,
                                        text=True, timeout=30)

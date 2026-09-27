@@ -245,7 +245,13 @@ def install_service(plan: dict, dry_run: bool = True) -> dict:
         wrapper_path.write_text(_wrapper(plan), encoding="utf-8")
         definition_path.write_text(_render(plan), encoding="utf-8")
         subprocess.run(["schtasks", "/Create", "/TN", SERVICE_ID, "/XML",
-                        plan["definition_path"], "/RL", "LIMITED", "/F"], check=True)
+                        plan["definition_path"], "/F"], check=True)
+        # schtasks rejects /RL beside /XML on some Windows versions. Set the
+        # limited run level after registration and verify it below.
+        subprocess.run(["schtasks", "/Change", "/TN", SERVICE_ID,
+                        "/RL", "LIMITED"], check=True)
+        if not _owned_xml(_query_xml().stdout, plan):
+            raise RuntimeError("scheduled task differs after limited run-level registration")
         subprocess.run(["schtasks", "/Run", "/TN", SERVICE_ID], check=True)
     return {"action": "install_and_start", "dry_run": dry_run, **status}
 
