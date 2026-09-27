@@ -2,6 +2,7 @@
 import hmac
 import os
 import stat
+import subprocess
 import threading
 from http.server import ThreadingHTTPServer
 
@@ -29,12 +30,37 @@ _file_lock = threading.Lock()
 NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
 
 
-def private_regular(info):
+def windows_acl_private(path):
+    """Check a credential's DACL; Windows mode bits do not describe sharing."""
+    if os.path.islink(path):
+        return False
+    script = (
+        "$ErrorActionPreference='Stop'; "
+        "try { $acl=[System.IO.File]::GetAccessControl($env:JEV_ACL_CHECK_PATH); "
+        "$self=[Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
+        "$allowed=@($self,'S-1-5-18','S-1-5-32-544'); "
+        "$rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]); "
+        "foreach ($ace in $rules) { "
+        "if ($ace.AccessControlType -eq 'Allow' -and "
+        "$ace.IdentityReference.Value -notin $allowed) { exit 3 } }; exit 0 } "
+        "catch { exit 2 }"
+    )
+    try:
+        result = subprocess.run(
+            ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
+            env={**os.environ, "JEV_ACL_CHECK_PATH": os.fspath(path)},
+            capture_output=True, check=False, timeout=45,
+        )
+        return result.returncode == 0
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
+def private_regular(info, path=None):
     if not stat.S_ISREG(info.st_mode):
         return False
     if os.name == "nt":
-        # Windows ACLs are checked by the installer. st_mode is not an ACL.
-        return True
+        return path is not None and windows_acl_private(path)
     return not (info.st_mode & 0o077) and info.st_uid == os.getuid()
 
 
@@ -51,7 +77,7 @@ def local_secret():
         fd = os.open(AUTH_PATH, os.O_RDONLY | NOFOLLOW)
         with os.fdopen(fd, "r", encoding="utf-8") as handle:
             info = os.fstat(handle.fileno())
-            if not private_regular(info):
+            if not private_regular(info, AUTH_PATH):
                 return ""
             return handle.read(4096).strip()
     except (OSError, UnicodeError):
@@ -75,9 +101,9 @@ def append_private(path, text, max_bytes=MAX_LOG_BYTES):
             restrict_file(fd)
             if os.fstat(fd).st_size + len(data) > max_bytes:
                 backup = path + ".1"
-                os.replace(path, backup)
                 os.close(fd)
                 fd = None
+                os.replace(path, backup)
                 fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | NOFOLLOW, 0o600)
             with os.fdopen(fd, "ab") as handle:
                 fd = None

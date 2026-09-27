@@ -48,7 +48,8 @@ class EmbeddedRouterLayout(unittest.TestCase):
             slugs = [model["slug"] for model in payload["models"]]
             self.assertEqual(slugs.count("jev/auto"), 1)
             self.assertIn("example/model", slugs)
-            self.assertEqual(user_models.stat().st_mode & 0o777, 0o600)
+            if os.name != "nt":
+                self.assertEqual(user_models.stat().st_mode & 0o777, 0o600)
 
 
 if __name__ == "__main__":

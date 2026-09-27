@@ -75,6 +75,7 @@ class LocalControls(unittest.TestCase):
         self.assertFalse(local_runtime.authorized("Bearer ", ""))
         self.assertTrue(local_runtime.authorized("Bearer fixture", "fixture"))
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits do not represent Windows ACLs")
     def test_local_credential_requires_private_permissions(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "key"
@@ -93,7 +94,8 @@ class LocalControls(unittest.TestCase):
             self.assertEqual(len(list(Path(tmp).iterdir())), 2)
             for file in Path(tmp).iterdir():
                 self.assertLessEqual(file.stat().st_size, 10)
-                self.assertEqual(file.stat().st_mode & 0o777, 0o600)
+                if os.name != "nt":
+                    self.assertEqual(file.stat().st_mode & 0o777, 0o600)
 
     def test_healthcheck_requires_correct_service_and_json(self):
         for payload, status, expected in [

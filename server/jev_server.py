@@ -248,6 +248,8 @@ def load_key():
         if not key_file:
             return ""
         mode = stat.S_IMODE(os.stat(key_file).st_mode)
+        if os.name == "nt" and not private_regular(os.stat(key_file), key_file):
+            raise PermissionError("OpenRouter key file must have a private Windows ACL")
         if os.name != "nt" and mode != 0o600:
             raise PermissionError("OpenRouter key file must be mode 0600")
         with open(key_file, encoding="utf-8") as source:
@@ -255,6 +257,8 @@ def load_key():
     key_file = os.environ.get("TYPESAFE_API_KEY_FILE", "").strip()
     if key_file:
         mode = stat.S_IMODE(os.stat(key_file).st_mode)
+        if os.name == "nt" and not private_regular(os.stat(key_file), key_file):
+            raise PermissionError("TypeSafe key file must have a private Windows ACL")
         if os.name != "nt" and mode != 0o600:
             raise PermissionError("TypeSafe key file must be mode 0600")
         with open(key_file, encoding="utf-8") as source:
@@ -636,7 +640,7 @@ def _omniroute_key():
     fd = os.open(source, os.O_RDONLY | NOFOLLOW)
     with os.fdopen(fd, "r", encoding="utf-8") as handle:
         info = os.fstat(handle.fileno())
-        if not private_regular(info):
+        if not private_regular(info, source):
             raise PermissionError("OmniRoute auth file must be private")
         value = json.load(handle)
     key = (value.get("omniroute") or {}).get("key") if isinstance(value, dict) else None

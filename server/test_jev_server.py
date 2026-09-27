@@ -18,6 +18,7 @@ import jev_server as jev
 
 
 class KeyLoading(unittest.TestCase):
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits do not represent Windows ACLs")
     def test_protected_key_file_is_used_without_copying_a_secret(self):
         with tempfile.TemporaryDirectory() as tmp:
             key_path = os.path.join(tmp, "typesafe.key")
@@ -85,6 +86,7 @@ class KeyLoading(unittest.TestCase):
         self.assertIn("Jev decision API key is not configured", stderr.getvalue())
         self.assertIn("fail open to astra", stderr.getvalue())
 
+    @unittest.skipIf(os.name == "nt", "POSIX mode bits do not represent Windows ACLs")
     def test_openrouter_key_file_is_private_and_does_not_use_typesafe_fallback(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = os.path.join(tmp, "decision.key")

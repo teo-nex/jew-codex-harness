@@ -207,6 +207,7 @@ def main() -> int:
                         saved = json.loads(journal_path.read_text(encoding="utf-8"))
                         phase = saved.get("phase", "invalid")
                         if "owned" in saved:
+                            sys.path.insert(0, str(REPO))
                             from harness.core import _inventory
                             try:
                                 actual = _inventory(profile, Path(saved["definition_path"]))

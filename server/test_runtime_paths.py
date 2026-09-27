@@ -1,5 +1,6 @@
 """Runtime path resolution must match the embedded router configuration."""
 import pathlib
+import os
 import unittest
 
 from local_runtime import resolve_runtime_paths
@@ -9,15 +10,15 @@ class RuntimePaths(unittest.TestCase):
     def test_defaults_under_the_owner_codex_home(self):
         home, codex_home, state = resolve_runtime_paths({}, "/Users/example")
         self.assertEqual(home, "/Users/example")
-        self.assertEqual(codex_home, "/Users/example/.codex")
-        self.assertEqual(state, "/Users/example/.codex/codex-router")
+        self.assertEqual(codex_home, os.path.join("/Users/example", ".codex"))
+        self.assertEqual(state, os.path.join(codex_home, "codex-router"))
 
     def test_codex_home_moves_the_default_state(self):
         _, codex_home, state = resolve_runtime_paths(
             {"CODEX_HOME": "/tmp/custom-codex"}, "/Users/example"
         )
         self.assertEqual(codex_home, "/tmp/custom-codex")
-        self.assertEqual(state, "/tmp/custom-codex/codex-router")
+        self.assertEqual(state, os.path.join("/tmp/custom-codex", "codex-router"))
 
     def test_explicit_router_state_wins_over_every_other_location(self):
         _, _, state = resolve_runtime_paths({
