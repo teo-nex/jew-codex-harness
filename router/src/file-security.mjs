@@ -173,7 +173,10 @@ function protectPrivateFilesWin32(paths) {
       {
         env: windowsPowerShellEnvironment(list),
         stdio: ["ignore", "ignore", "pipe"],
-        timeout: 15_000,
+        // A cold hosted Windows image can spend more than 15 seconds loading
+        // PowerShell and applying the first DACL. Keep the operation bounded
+        // and fail closed, but allow that startup work to finish.
+        timeout: 45_000,
         // Every private write reaches this helper, including the ones a
         // Control Center status refresh performs. A console child of a GUI
         // parent gets its own window unless this is set, which is how a

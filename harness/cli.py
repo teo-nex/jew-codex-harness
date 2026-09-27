@@ -16,7 +16,8 @@ from . import onboard
 
 def parser() -> argparse.ArgumentParser:
     app = argparse.ArgumentParser(description="Install Jev Codex Harness into a fresh Codex profile")
-    app.add_argument("--codex-home", type=Path, default=Path(os.environ.get("CODEX_HOME", Path.home() / ".codex")))
+    app.add_argument("--codex-home", type=Path,
+                     default=Path(os.environ["CODEX_HOME"]) if os.environ.get("CODEX_HOME") else Path.home() / ".codex")
     app.add_argument("--ladder-config", type=Path, default=Path(os.environ["JEV_LADDER_CONFIG"]) if os.environ.get("JEV_LADDER_CONFIG") else None)
     app.add_argument("--omniroute-auth-file", type=Path, default=Path(os.environ["JEV_OMNIROUTE_AUTH_FILE"]) if os.environ.get("JEV_OMNIROUTE_AUTH_FILE") else None)
     app.add_argument("--jev-provider", choices=("typesafe", "openrouter"),

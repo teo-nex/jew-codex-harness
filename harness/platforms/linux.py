@@ -118,7 +118,7 @@ def _render(plan):
     command = " ".join(_systemd_quote(v) for v in plan["command"])
     return (f"# {MARKER}\n[Unit]\nDescription=Jev Codex Harness router\n"
             "After=network-online.target\n\n[Service]\nType=simple\n"
-            f"WorkingDirectory={_systemd_quote(plan['repo'])}\nExecStart={command}\n{env_lines}\n"
+            f"WorkingDirectory={_systemd_quote(plan['repo'])[1:-1]}\nExecStart={command}\n{env_lines}\n"
             "Restart=on-failure\nRestartSec=5\n\n[Install]\nWantedBy=default.target\n")
 
 

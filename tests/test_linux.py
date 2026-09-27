@@ -28,7 +28,7 @@ class LinuxServiceTests(unittest.TestCase):
         self.plan["repo"] = "/tmp/agent repo's"
         self.plan["command"] = ["/tmp/python env/bin/python", "/tmp/agent repo/server.py"]
         unit = linux._render(self.plan)
-        self.assertIn('WorkingDirectory="/tmp/agent repo\'s"', unit)
+        self.assertIn("WorkingDirectory=/tmp/agent repo's", unit)
         self.assertIn('ExecStart="/tmp/python env/bin/python" "/tmp/agent repo/server.py"', unit)
         self.assertNotIn("'", unit.split("ExecStart=", 1)[1].splitlines()[0])
 
@@ -37,7 +37,7 @@ class LinuxServiceTests(unittest.TestCase):
         self.plan["command"] = ["/usr/bin/python3", self.plan["repo"] + "/jev_server.py"]
         self.plan["env_paths"]["JEV_LADDER_CONFIG"] = self.plan["repo"] + "/ladder.json"
         unit = linux._render(self.plan)
-        self.assertIn('WorkingDirectory="/tmp/агент 100%% \\"один\\"\\\\проект"', unit)
+        self.assertIn('WorkingDirectory=/tmp/агент 100%% \\"один\\"\\\\проект', unit)
         self.assertIn('ExecStart="/usr/bin/python3" "/tmp/агент 100%% \\"один\\"\\\\проект/jev_server.py"', unit)
         self.assertIn('Environment="JEV_LADDER_CONFIG=/tmp/агент 100%% \\"один\\"\\\\проект/ladder.json"', unit)
         self.assertNotIn("\\u0430", unit)

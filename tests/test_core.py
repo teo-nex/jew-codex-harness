@@ -347,7 +347,8 @@ class InstallCoreTests(unittest.TestCase):
     def test_resume_refuses_ambiguous_router_bootstrap(self):
         with self.assertRaises(core.subprocess.CalledProcessError):
             self._installed("install.sh")
-        with mock.patch.object(core.subprocess, "run") as process:
+        with mock.patch.object(core.subprocess, "run") as process, \
+             mock.patch("harness.platforms.macos.service_status", return_value={"installed": False, "active": False}):
             with self.assertRaisesRegex(core.InstallError, "ambiguous"):
                 core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
         self.assertFalse(any("router/install.sh" in " ".join(map(str, call.args[0]))
@@ -423,7 +424,8 @@ class InstallCoreTests(unittest.TestCase):
     def test_managed_host_entries_cannot_be_changed_or_removed(self):
         cases = (
             ("config.toml", lambda path: path.write_text(path.read_text().replace(
-                str(REPO / "integrations/workers/mcp.py"), "/foreign/mcp.py"))),
+                core._toml_string(str(REPO / "integrations/workers/mcp.py")),
+                core._toml_string("/foreign/mcp.py")))),
             ("hooks.json", lambda path: path.write_text(path.read_text().replace(" pre_tool", " foreign_tool"))),
             ("AGENTS.md", lambda path: path.write_text(path.read_text().replace("safeBrowserClick", "rawClick"))),
         )
@@ -481,7 +483,7 @@ class InstallCoreTests(unittest.TestCase):
     def test_rollback_preserves_preexisting_agent_instructions(self):
         original_agents = "# Router instructions\n\nKeep this exact line.  \n"
         def process(command, **kwargs):
-            if any("router/install.sh" in str(part) for part in command):
+            if any("router/install.sh" in str(part).replace("\\", "/") for part in command):
                 (self.home / "AGENTS.md").write_text(original_agents)
             return mock.Mock(returncode=0, stdout="")
         with mock.patch.object(core, "doctor", return_value={"ready": True, "issues": []}), \
@@ -499,7 +501,7 @@ class InstallCoreTests(unittest.TestCase):
     def test_native_router_uninstall_requires_exact_definition(self):
         definition = self.root / "router.plist"
         def process(command, **kwargs):
-            rendered = " ".join(map(str, command))
+            rendered = " ".join(map(str, command)).replace("\\", "/")
             if "router/install.sh" in rendered:
                 definition.write_text("owned router definition")
             if "src/service.mjs uninstall" in rendered:
@@ -580,7 +582,8 @@ class InstallCoreTests(unittest.TestCase):
         self.assertFalse(result["service_health"])
         config_path = self.home / "config.toml"
         config_path.write_text(config_path.read_text().replace(
-            str(REPO / "integrations/workers/mcp.py"), "/foreign/mcp.py"))
+            core._toml_string(str(REPO / "integrations/workers/mcp.py")),
+            core._toml_string("/foreign/mcp.py")))
         with mock.patch("harness.platforms.macos.service_status", return_value={"installed": True, "active": True, "owned": True}):
             result = core.verify(self.home)
         self.assertFalse(result["worker_mcp_config"])
