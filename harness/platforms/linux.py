@@ -33,6 +33,8 @@ def _environment(codex_home, state_dir, env):
     if mode == "native" and any(key in env for key in ("JEV_LADDER_CONFIG", "JEV_LADDER_STATE", "JEV_OMNIROUTE_AUTH_FILE")):
         raise ValueError("native mode must not configure an external provider ladder")
     values = {"CODEX_HOME": str(codex_home),
+              "MODEL_ROUTER_TARGET": "codex",
+              "MODEL_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "CODEX_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "JEV_LISTEN_PORT": str(env.get("JEV_LISTEN_PORT", "4321")),
               "JEV_LADDER_MODE": mode, "JEV_DECISION_PROVIDER": provider}
@@ -66,7 +68,10 @@ def plan_service(repo: Path, codex_home: Path, state_dir: Path, env: dict[str, s
     server = repo / "server/jev_server.py"
     if not server.is_file():
         raise FileNotFoundError(server)
-    definition = Path.home() / ".config/systemd/user" / SERVICE_ID
+    config_home = Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    if not config_home.is_absolute():
+        config_home = Path.home() / ".config"
+    definition = config_home / "systemd/user" / SERVICE_ID
     return {"platform": "linux", "service_id": SERVICE_ID, "marker": MARKER,
             "definition_path": str(definition), "repo": str(repo),
             "command": [sys.executable, str(server)], "env_paths": values,

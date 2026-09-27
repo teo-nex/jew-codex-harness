@@ -35,6 +35,8 @@ def _environment(codex_home, state_dir, env):
     if mode == "native" and any(key in env for key in ("JEV_LADDER_CONFIG", "JEV_LADDER_STATE", "JEV_OMNIROUTE_AUTH_FILE")):
         raise ValueError("native mode must not configure an external provider ladder")
     values = {"CODEX_HOME": str(codex_home),
+              "MODEL_ROUTER_TARGET": "codex",
+              "MODEL_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "CODEX_ROUTER_STATE_DIR": str(codex_home / "codex-router"),
               "JEV_LISTEN_PORT": str(env.get("JEV_LISTEN_PORT", "4321")),
               "JEV_LADDER_MODE": mode, "JEV_DECISION_PROVIDER": provider}
@@ -49,6 +51,10 @@ def _environment(codex_home, state_dir, env):
             value = str(env[key])
             if not Path(value).is_absolute():
                 raise ValueError(f"{key} must be an absolute path")
+            if key in ("CODEX_HOME", "CODEX_ROUTER_STATE_DIR"):
+                if Path(value).resolve() != Path(values[key]).resolve():
+                    raise ValueError(f"{key} is fixed by the selected Codex profile")
+                continue
             values[key] = value
     forbidden = set(env) - set(PATH_ENV) - {"JEV_LISTEN_PORT", "JEV_LADDER_MODE", "JEV_DECISION_PROVIDER"}
     if forbidden:
@@ -88,7 +94,7 @@ def _active(plan):
 
 def service_status(plan: dict) -> dict:
     path = Path(plan["definition_path"])
-    installed = path.exists()
+    installed = path.exists() or path.is_symlink()
     owner = _owned(path) if installed else False
     active = _active(plan)
     return {"installed": installed, "owned": owner, "active": active,

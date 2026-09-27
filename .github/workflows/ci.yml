@@ -64,6 +64,8 @@ jobs:
         run: npm run check
       - name: Focused routing and transport tests
         run: node --test test/error-chain.test.mjs test/fetch-transport.test.mjs test/transport-failure.test.mjs
+      - name: Browser broker contract tests
+        run: node --test ../tests/browser_broker.test.mjs
 
   install-smoke:
     name: Install smoke (${{ matrix.os }})

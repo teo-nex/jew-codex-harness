@@ -24,6 +24,12 @@ class LinuxServiceTests(unittest.TestCase):
         self.assertIn("JEV_LADDER_CONFIG=", unit)
         self.assertNotIn("TYPESAFE_API_KEY=", unit)
 
+    def test_unit_uses_xdg_config_directory(self):
+        config = self.root / "custom-config"
+        with patch.dict(os.environ, {"XDG_CONFIG_HOME": str(config)}):
+            plan = linux.plan_service(self.root, self.root / "codex", self.root / "state", {})
+        self.assertEqual(Path(plan["definition_path"]), config / "systemd/user" / linux.SERVICE_ID)
+
     def test_systemd_quotes_paths_with_spaces_using_its_own_syntax(self):
         self.plan["repo"] = "/tmp/agent repo's"
         self.plan["command"] = ["/tmp/python env/bin/python", "/tmp/agent repo/server.py"]

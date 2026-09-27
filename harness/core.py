@@ -263,6 +263,12 @@ def doctor(repo: Path, codex_home: Path, ladder: Path | None, omni: Path | None,
             "platform": os_name or sys.platform}
 
 
+def _router_environment(home: Path, state: Path | None = None) -> dict[str, str]:
+    state = state if state is not None else home / "codex-router"
+    return {**os.environ, "CODEX_HOME": str(home), "MODEL_ROUTER_TARGET": "codex",
+            "MODEL_ROUTER_STATE_DIR": str(state), "CODEX_ROUTER_STATE_DIR": str(state)}
+
+
 def prepare(repo: Path, codex_home: Path, os_name: str | None = None) -> dict:
     """Prepare dependencies in an isolated temporary profile, never live state."""
     import tempfile
@@ -270,9 +276,7 @@ def prepare(repo: Path, codex_home: Path, os_name: str | None = None) -> dict:
     if not (repo / "router/bin/install").is_file():
         raise InstallError("Embedded router installer missing")
     with tempfile.TemporaryDirectory(prefix="jev-prepare-") as scratch:
-        env = os.environ.copy()
-        env["CODEX_HOME"] = scratch
-        env["CODEX_ROUTER_STATE_DIR"] = str(Path(scratch) / "router")
+        env = _router_environment(Path(scratch), Path(scratch) / "router")
         if (os_name or sys.platform) in ("windows", "win32"):
             command = ["powershell", "-NoProfile", "-File", str(repo / "router/install.ps1"),
                        "-CheckoutInstall", "-PrepareOnly"]
@@ -514,9 +518,7 @@ def _checkpoint(state: Path, home: Path, plan: dict, journal: dict, phase: str) 
 
 def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
     repo, home, state, plan = (ctx[key] for key in ("repo", "codex_home", "state", "service"))
-    env = os.environ.copy()
-    env["CODEX_HOME"] = str(home)
-    env["CODEX_ROUTER_STATE_DIR"] = str(home / "codex-router")
+    env = _router_environment(home)
     port = ctx["port"]
     provider = ["node", str(repo / "router/src/providers.mjs"), "generic"]
 
@@ -700,9 +702,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
     previous = journal.copy()
     journal["phase"] = "router_started"
     _journal(state, journal, previous)
-    env = os.environ.copy()
-    env["CODEX_HOME"] = str(home)
-    env["CODEX_ROUTER_STATE_DIR"] = str(home / "codex-router")
+    env = _router_environment(home)
     if (os_name or sys.platform) in ("windows", "win32"):
         command = ["powershell", "-NoProfile", "-File", str(repo / "router/install.ps1"),
                    "-CheckoutInstall", "-Target", "codex", "-NoProvider", "-NoDiscovery", "-NoTray"]
@@ -883,8 +883,7 @@ def rollback(codex_home: Path, os_name: str | None = None) -> dict:
         _journal(home / "jev-harness", journal, previous)
     router_removed = journal["phase"] == "router_removed"
     if router_proven and journal["phase"] == "service_removed":
-        env = {**os.environ, "CODEX_HOME": str(home),
-               "CODEX_ROUTER_STATE_DIR": str(home / "codex-router")}
+        env = _router_environment(home)
         subprocess.run(["node", str(repo / "router/src/config-manager.mjs"), "disable"],
                        cwd=repo / "router", env=env, check=True)
         previous = journal.copy()
@@ -892,8 +891,7 @@ def rollback(codex_home: Path, os_name: str | None = None) -> dict:
         journal["owned"] = _managed_inventory(home, Path(plan["definition_path"]))
         _journal(home / "jev-harness", journal, previous)
     if router_proven and journal["phase"] == "router_disabled":
-        env = {**os.environ, "CODEX_HOME": str(home),
-               "CODEX_ROUTER_STATE_DIR": str(home / "codex-router")}
+        env = _router_environment(home)
         subprocess.run(["node", str(repo / "router/src/service.mjs"), "uninstall"],
                        cwd=repo / "router", env=env, check=True)
         router_removed = True

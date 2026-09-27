@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import threading
 import unittest
 from unittest import mock
 
@@ -85,6 +86,35 @@ class PortableWorkersTest(unittest.TestCase):
             self.assertFalse(answer["isError"])
             self.assertEqual(json.loads(answer["content"][0]["text"])["task_id"], "test")
             self.assertEqual(len(module.handle({"method": "tools/list"})["tools"]), 5)
+
+    def test_timeout_covers_child_that_never_reads_large_prompt(self):
+        with mock.patch.object(portable.shutil, "which", return_value=sys.executable), \
+             mock.patch.object(portable.subprocess, "Popen"):
+            task_id = portable.submit({**self.task, "mandatory_instructions": "x" * 2000000})["task_id"]
+        path = self.state / task_id / "task.json"
+        task = portable._read(path)
+        task["budget"]["max_seconds"] = 0.1
+        portable._write(path, task)
+        popen = portable.subprocess.Popen
+        children = []
+
+        def launch(command, **kwargs):
+            child = popen([sys.executable, "-c", "import time; time.sleep(30)"], **kwargs)
+            children.append(child)
+            return child
+
+        with mock.patch.object(portable.subprocess, "Popen", side_effect=launch):
+            runner = threading.Thread(target=portable._run, args=(task_id,), daemon=True)
+            runner.start()
+            runner.join(timeout=3)
+            bounded = not runner.is_alive()
+            for child in children:
+                if child.poll() is None:
+                    child.kill()
+                child.wait(timeout=3)
+            runner.join(timeout=3)
+        self.assertTrue(bounded, "writing stdin bypassed the worker deadline")
+        self.assertEqual(portable.status(task_id)["reason"], "worker_timeout")
 
 
 if __name__ == "__main__":
