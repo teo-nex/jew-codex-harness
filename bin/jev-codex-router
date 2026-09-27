@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+self=$0
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case $link in
+    /*) self=$link ;;
+    *) self=$(dirname -- "$self")/$link ;;
+  esac
+done
+repo_dir=$(CDPATH='' cd -P -- "$(dirname -- "$self")/.." && pwd -P)
+
+usage() {
+  cat <<'EOF'
+Usage: jev-codex-router COMMAND [ARGS...]
+
+Commands:
+  cli ARGS...                Run the safe harness doctor/prepare/install/verify/rollback CLI
+  update                    Disabled; review a Git update before reinstalling
+  router ARGS...            Run the embedded codex-router CLI
+  smoke                     Run the Jev end-to-end smoke test
+  report [ARGS...]          Report observed routing and cache usage
+  api-cost [ARGS...]        Report API-price equivalents from local usage
+  efficiency [ARGS...]      Summarize routing and worker usage
+  verify-worker TASK_ID     Inspect one owned worker result
+  help                      Show this help
+EOF
+}
+
+command=${1:-help}
+if [ "$#" -gt 0 ]; then shift; fi
+case "$command" in
+  cli) exec "$repo_dir/install.sh" "$@" ;;
+  update) echo "Update this repository through Git review, then rerun ./install.sh doctor and prepare." >&2; exit 2 ;;
+  router) exec "$repo_dir/router/bin/codex-router" "$@" ;;
+  smoke) exec python3 "$repo_dir/server/smoke.py" "$@" ;;
+  report) exec python3 "$repo_dir/server/report_routing.py" "$@" ;;
+  api-cost) exec python3 "$repo_dir/integrations/jev/report_api_cost.py" "$@" ;;
+  efficiency) exec python3 "$repo_dir/integrations/jev/report_efficiency.py" "$@" ;;
+  verify-worker) exec python3 "$repo_dir/integrations/jev/verify_worker.py" "$@" ;;
+  help|-h|--help) usage ;;
+  *) usage >&2; exit 2 ;;
+esac

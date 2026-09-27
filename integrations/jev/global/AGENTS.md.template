@@ -1,0 +1,9 @@
+<!-- BEGIN jev-codex-harness managed -->
+## Jev in Codex
+
+- `jev/auto` selects the provider and reasoning depth. Use `jev-workers` only for independent, bounded tasks with a checkable result. Keep one worker conversation through provider fallbacks.
+- A manually selected model keeps normal Codex Tool Use permissions. Jev still helps with Browser Use, Computer Use and compact context in both modes.
+- Before Browser or Computer actions, read the installed capability skill. When the client exposes `node_repl` and the corresponding UI runtime, import `{{JEV_UI_PATH}}` and use `safeBrowserClick`, `safeBrowserSetValue`, `safeComputerClick` or `safeComputerSetValue`. Read-only inspection uses the client API. If that runtime is unavailable, report the missing capability.
+- In CanvasTTY, use `jev-browser.browser_task` when that MCP is available. It keeps the full DOM inside the broker and returns a short verified result. Check navigation or page state after a click; `clicked: true` alone is insufficient.
+- If Jev declines or cannot evaluate a UI action, report that blocker instead of using a raw UI call to bypass it. For compaction, keep only active goals, unresolved errors, decisions and needed file references.
+<!-- END jev-codex-harness managed -->
