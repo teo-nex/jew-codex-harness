@@ -16,7 +16,7 @@ tests under `tests/` and `server/` across Ubuntu, macOS, and Windows with Python
 The router lane runs `npm ci`, an isolated Node configuration smoke (`scripts/smoke_config_offline.py`),
 the repository's static check (`npm run check`), and focused tests for error-chain,
 fetch transport, and transport-failure behavior under Node 22.19 and Python 3.11.
-The router lane does not install browser engines, Codex CLI, or provider credentials.
+The router lane does not install browser engines or provider credentials.
 
 ### Install smoke matrix (`install-smoke`)
 The dedicated `install-smoke` lane checks installation mechanics across
@@ -52,12 +52,11 @@ After a green GitHub-hosted run, CI would prove only the following properties:
 2. **Router integrity:** Router dependencies install cleanly under Node 22.19; TypeScript/type checks pass; routing and transport failure unit tests pass.
 3. **Offline configuration generation:** Offline provider setup, model registry, local transport key generation, and catalog refresh succeed in a temporary, isolated profile directory.
 4. **Clean repository hygiene & packaging:** No secrets, credentials, logs, or runtime state are tracked; clean release archives build deterministically.
-5. **Install smoke mechanics:** The real installer completes in a fresh profile, owned files and service start, loopback `/health` responds, and owned rollback succeeds on each runner OS. The synthetic key cannot authenticate a live provider request.
+5. **Install smoke mechanics:** The real installer completes in a fresh profile, owned files and service start, loopback `/health` responds, and owned rollback succeeds on each runner OS. The synthetic key cannot authenticate a live provider request. Native session sharing remains pending explicit owner opt-in.
 
-The local checkout has no configured Git remote, so writing this workflow does not
-count as a GitHub-hosted run. Only a green Actions run for the published commit
-is cross-platform installation evidence. A red job is an installation failure
-to investigate, not a pass that may be relabeled as a preflight result.
+Only a green Actions run for the published commit is cross-platform offline
+installation evidence. A red job is an installation failure to investigate,
+not a pass that may be relabeled as a preflight result.
 
 ### Unproved live GUI, OAuth, and provider properties
 

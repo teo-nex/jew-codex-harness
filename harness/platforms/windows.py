@@ -200,16 +200,19 @@ def _private_state_dir(path: Path, create: bool = False):
     # Reset inherited broad access and grant the current user plus Windows
     # service administrators access. Environment variables carry the path so
     # PowerShell never has to parse user-controlled path text as code.
-    script = ("$p=$env:JEV_STATE_PATH; $acl=Get-Acl -LiteralPath $p; "
+    script = ("$ErrorActionPreference='Stop'; try { $p=$env:JEV_STATE_PATH; "
+              "$acl=[System.Security.AccessControl.DirectorySecurity]::new(); "
               "$acl.SetAccessRuleProtection($true,$false); "
-              "$rules=@($acl.Access); foreach($old in $rules) { [void]$acl.RemoveAccessRuleSpecific($old) }; "
               "$sid=[Security.Principal.WindowsIdentity]::GetCurrent().User; "
-              "$inherit=[Security.AccessControl.InheritanceFlags]'ContainerInherit, ObjectInherit'; "
+              "$inherit=[Security.AccessControl.InheritanceFlags]::ContainerInherit -bor "
+              "[Security.AccessControl.InheritanceFlags]::ObjectInherit; "
               "$prop=[Security.AccessControl.PropagationFlags]::None; "
               "$allow=[Security.AccessControl.AccessControlType]::Allow; "
+              "$full=[Security.AccessControl.FileSystemRights]::FullControl; "
               "foreach($id in @($sid.Value,'S-1-5-18','S-1-5-32-544')) { "
-              "$rule=[Security.AccessControl.FileSystemAccessRule]::new($id,'FullControl',$inherit,$prop,$allow); "
-              "$acl.SetAccessRule($rule) }; Set-Acl -LiteralPath $p -AclObject $acl")
+              "$rule=[Security.AccessControl.FileSystemAccessRule]::new($id,$full,$inherit,$prop,$allow); "
+              "$acl.AddAccessRule($rule) }; [System.IO.Directory]::SetAccessControl($p,$acl) } "
+              "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }")
     env = {**os.environ, "JEV_STATE_PATH": str(path)}
     result = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
                             env=env, capture_output=True, check=False)

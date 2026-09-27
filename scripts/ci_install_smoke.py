@@ -37,10 +37,15 @@ def _private_synthetic_key(path: Path) -> None:
     script = (
         "$ErrorActionPreference = 'Stop'; $p = $env:JEV_CI_KEY_PATH; "
         "$sid = [Security.Principal.WindowsIdentity]::GetCurrent().User; "
-        "$acl = New-Object Security.AccessControl.FileSecurity; "
-        "$acl.SetOwner($sid); $acl.SetAccessRuleProtection($true, $false); "
-        "$rule = New-Object Security.AccessControl.FileSystemAccessRule($sid, 'Read', 'Allow'); "
-        "$acl.AddAccessRule($rule); Set-Acl -LiteralPath $p -AclObject $acl"
+        "try { $acl = [System.Security.AccessControl.FileSecurity]::new(); "
+        "$acl.SetAccessRuleProtection($true, $false); "
+        "$rule = [System.Security.AccessControl.FileSystemAccessRule]::new("
+        "$sid, [System.Security.AccessControl.FileSystemRights]::FullControl, "
+        "[System.Security.AccessControl.InheritanceFlags]::None, "
+        "[System.Security.AccessControl.PropagationFlags]::None, "
+        "[System.Security.AccessControl.AccessControlType]::Allow); "
+        "$acl.AddAccessRule($rule); [System.IO.File]::SetAccessControl($p, $acl) } "
+        "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 1 }"
     )
     result = subprocess.run(
         ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -111,13 +116,17 @@ def main() -> int:
         env = os.environ.copy()
         env["CODEX_HOME"] = str(profile)
         env["CODEX_ROUTER_STATE_DIR"] = str(profile / "codex-router")
-        if os.name != "nt":
+        if sys.platform == "darwin":
             env["HOME"] = str(home)
         for name, dirname in (("XDG_CONFIG_HOME", "config"),
                               ("XDG_DATA_HOME", "data"),
                               ("XDG_CACHE_HOME", "cache"),
                               ("XDG_STATE_HOME", "state")):
             env[name] = str(root / dirname)
+        if sys.platform == "linux":
+            # The user systemd manager resolves units under the runner's real
+            # home; an isolated XDG_CONFIG_HOME would hide the installed unit.
+            env["XDG_CONFIG_HOME"] = str(Path.home() / ".config")
 
         installed = False
         failed = False

@@ -144,8 +144,11 @@ class InstallCoreTests(unittest.TestCase):
         self.assertEqual(json.loads((self.home / "jev-harness/ladder-config.json").read_text()), LADDER)
         self.assertIn("jev-workers", (self.home / "config.toml").read_text())
         self.assertIsNone(json.loads((self.home / "jev-harness/manifest.json").read_text())["model_after"])
+        self.assertEqual(json.loads((self.home / "jev-harness/manifest.json").read_text())["native_session_sharing"],
+                         "pending_explicit_opt_in")
         self.assertTrue(service.call_args.kwargs["dry_run"] is False)
         self.assertTrue(any("configure-auth.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
+        self.assertFalse(any("chatgpt-session.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("synthetic" in str(call) for call in process.call_args_list))
 
     def test_native_install_omits_external_credentials_and_ladder_file(self):
@@ -238,18 +241,17 @@ class InstallCoreTests(unittest.TestCase):
         self.assertFalse(any("generic add" in command or "configure-model.mjs" in command for command in commands))
         self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
 
-    def test_resume_after_chatgpt_failure_requests_oauth_without_secret(self):
-        with self.assertRaisesRegex(core.InstallError, "Codex OAuth") as raised:
-            self._installed("chatgpt-session.mjs")
-        self.assertNotIn("synthetic", str(raised.exception))
+    def test_resume_after_catalog_failure_preserves_checkpoint(self):
+        with self.assertRaises(core.subprocess.CalledProcessError):
+            self._installed("refresh-catalog.mjs")
         journal = json.loads((self.home / "jev-harness/journal.json").read_text())
-        self.assertEqual(journal["phase"], "auth_configured")
+        self.assertEqual(journal["phase"], "chatgpt_deferred")
         self._installed()
         self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
 
     def test_reviewed_oauth_change_can_resume_without_adopting_other_edits(self):
-        with self.assertRaisesRegex(core.InstallError, "Codex OAuth"):
-            self._installed("chatgpt-session.mjs")
+        with self.assertRaises(core.subprocess.CalledProcessError):
+            self._installed("refresh-catalog.mjs")
         auth = self.home / "auth.json"
         auth.write_text('{"synthetic": "private"}')
         auth.chmod(0o600)
@@ -264,8 +266,8 @@ class InstallCoreTests(unittest.TestCase):
         self.assertTrue(result["installed"])
 
     def test_oauth_review_refuses_any_second_changed_file(self):
-        with self.assertRaisesRegex(core.InstallError, "Codex OAuth"):
-            self._installed("chatgpt-session.mjs")
+        with self.assertRaises(core.subprocess.CalledProcessError):
+            self._installed("refresh-catalog.mjs")
         auth = self.home / "auth.json"
         auth.write_text('{"synthetic": "private"}')
         (self.home / "config.toml").write_text('model = "foreign"\n')

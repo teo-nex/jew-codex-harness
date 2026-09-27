@@ -12,7 +12,8 @@ over. The router listens on loopback only.
 - Python 3.11+, Node.js 22.19+, npm, Codex CLI and a supported per-user service manager (`launchd`, `systemd --user`, or Windows Task Scheduler).
 - A Jev decision key from TypeSafe or OpenRouter. `onboard` can read it from a hidden terminal prompt and write a protected file; non-interactive installs supply only the protected file **path**.
 - For the optional external ladder: an existing OmniRoute gateway auth JSON in a protected file with `omniroute.key`, plus a private provider ladder JSON based on `config/ladder.example.json`. Supply both paths or neither. Store verified connection IDs and model IDs outside Git.
-- A working Codex/ChatGPT login. OAuth can require action by the account owner.
+- A Codex/ChatGPT login for native GPT routing. The account owner must complete
+  OAuth and explicitly opt in to native session sharing after installation.
 
 Interactive first install on an otherwise free host:
 
@@ -59,7 +60,18 @@ synthetic file in an ephemeral workspace and requires a matching hook receipt.
 File installation and service
 health do not prove the client loaded a hook.
 
-If installation stops at a recorded ChatGPT OAuth checkpoint, complete `codex login` for the selected `CODEX_HOME`, inspect the journal and profile changes, then rerun `resume` with the same path arguments. When the sole reviewed change is `auth.json`, supply its locally computed SHA-256 with `resume --reviewed-auth-sha256 HASH`; do not print or send the auth file. A router bootstrap that stopped before its ownership checkpoint remains blocked for manual review.
+The installer bootstraps the router with credential discovery disabled. It leaves
+native ChatGPT session sharing pending: local install and service health do not
+prove that the Plus-first or native-only route can answer. After the account
+owner signs in with `CODEX_HOME` set to the new profile, explicitly enable
+discovery and sharing with `node router/src/discovery-mode.mjs set enabled` and
+`node router/src/chatgpt-session.mjs enable`, using that same `CODEX_HOME` and
+`CODEX_ROUTER_STATE_DIR`. This permits the router to read the Codex session;
+review that access before opting in. Then run `verify --live` in the selected
+profile. If OAuth changes `auth.json` during an interrupted installation,
+inspect the journal and resume with `--reviewed-auth-sha256 HASH` for its exact
+locally computed SHA-256. Do not print or send the auth file. A router bootstrap
+that stopped before its ownership checkpoint remains blocked for manual review.
 
 For an offline check of the real provider/model/key/catalog commands without touching the current profile or calling a model, run `python3 scripts/smoke_config_offline.py` (`py -3` on Windows).
 

@@ -43,14 +43,15 @@ def protected_file(path: Path, label: str) -> Path:
         # st_mode does not describe Windows ACLs. Reject read access granted to
         # any principal other than this user, SYSTEM or Administrators.
         script = (
-            "$acl = Get-Acl -LiteralPath $env:JEV_ACL_CHECK_PATH; "
+            "$ErrorActionPreference='Stop'; "
+            "try { $acl=[System.IO.File]::GetAccessControl($env:JEV_ACL_CHECK_PATH); "
             "$self = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value; "
             "$allowed = @($self, 'S-1-5-18', 'S-1-5-32-544'); "
-            "foreach ($ace in $acl.Access) { "
+            "$rules=$acl.GetAccessRules($true,$true,[Security.Principal.SecurityIdentifier]); "
+            "foreach ($ace in $rules) { "
             "if ($ace.AccessControlType -ne 'Allow') { continue }; "
-            "try { $sid = $ace.IdentityReference.Translate([Security.Principal.SecurityIdentifier]).Value } "
-            "catch { exit 2 }; "
-            "if ($sid -notin $allowed) { exit 3 } }; exit 0"
+            "if ($ace.IdentityReference.Value -notin $allowed) { exit 3 } }; exit 0 } "
+            "catch { [Console]::Error.WriteLine($_.Exception.Message); exit 2 }"
         )
         env = {**os.environ, "JEV_ACL_CHECK_PATH": str(path)}
         checked = subprocess.run(["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
@@ -448,7 +449,7 @@ def _read_journal(home: Path) -> dict:
             or data.get("repo") is None or data.get("service_id") is None
             or data.get("phase") not in {"started", "router_started", "router_ready", "provider_added",
                                          "provider_enabled", "model_configured", "auth_configured",
-                                         "chatgpt_enabled", "catalog_refreshed", "picker_configured",
+                                         "chatgpt_deferred", "catalog_refreshed", "picker_configured",
                                          "config_written", "hooks_written", "ladder_written",
                                          "ui_written", "skill_written", "agents_written",
                                          "service_installed", "manifest_written", "complete",
@@ -471,8 +472,8 @@ def _check_checkpoint(home: Path, plan: dict, journal: dict) -> None:
 
 def _review_oauth_change(home: Path, plan: dict, journal: dict, expected_sha256: str) -> None:
     """Allow only a specifically reviewed Codex OAuth file change after auth setup."""
-    if journal["phase"] != "auth_configured" or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
-        raise InstallError("OAuth review is valid only at the ChatGPT checkpoint with an exact SHA-256")
+    if journal["phase"] not in {"auth_configured", "chatgpt_deferred"} or not re.fullmatch(r"[0-9a-f]{64}", expected_sha256):
+        raise InstallError("OAuth review requires an exact post-auth checkpoint and SHA-256")
     definition = journal.get("router_definition_path")
     if definition and _digest(Path(definition)) != journal.get("router_definition_sha256"):
         raise InstallError("Embedded router service changed since installation checkpoint")
@@ -481,7 +482,7 @@ def _review_oauth_change(home: Path, plan: dict, journal: dict, expected_sha256:
     changed = {name for name in current.keys() | previous.keys() if current.get(name) != previous.get(name)}
     if changed != {"auth.json"} or current.get("auth.json") != expected_sha256:
         raise InstallError("OAuth review did not match the sole auth.json change; exact review required")
-    _checkpoint(home / "jev-harness", home, plan, journal, "auth_configured")
+    _checkpoint(home / "jev-harness", home, plan, journal, journal["phase"])
 
 
 def _check_router_provenance(home: Path, repo: Path) -> None:
@@ -552,7 +553,8 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
                     "model_after": config.get("model"),
                     "ladder_mode": ctx["ladder_mode"],
                     "jev_provider": ctx["jev_provider"],
-                    "browser_enabled": _browser_supported(os_name)}
+                    "browser_enabled": _browser_supported(os_name),
+                    "native_session_sharing": "pending_explicit_opt_in"}
         _atomic(state / "manifest.json", (json.dumps(manifest, indent=2) + "\n").encode())
 
     steps = [
@@ -562,7 +564,10 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
         ("provider_enabled", lambda: run(provider + ["enable", "jev"])),
         ("model_configured", lambda: run(["node", str(repo / "server/configure-model.mjs")])),
         ("auth_configured", lambda: run(["node", str(repo / "server/configure-auth.mjs")])),
-        ("chatgpt_enabled", lambda: run(["node", str(repo / "router/src/chatgpt-session.mjs"), "enable"])),
+        # Router bootstrap uses --no-discovery. Native session sharing cannot
+        # be enabled in that mode; leave OAuth and credential discovery to an
+        # explicit owner action after installation.
+        ("chatgpt_deferred", lambda: None),
         ("catalog_refreshed", lambda: run(["node", str(repo / "router/src/refresh-catalog.mjs")])),
         ("picker_configured", lambda: run(["node", str(repo / "router/src/control.mjs"), "picker", "set", "jev/auto", "show"])),
         ("config_written", write_config),
@@ -582,12 +587,7 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
     start = phases.index(journal["phase"])
     for name, action in steps[start:]:
         _check_checkpoint(home, plan, journal)
-        try:
-            action()
-        except subprocess.CalledProcessError as exc:
-            if name == "chatgpt_enabled":
-                raise InstallError("ChatGPT session enable failed; review profile changes and complete Codex OAuth, then resume") from exc
-            raise
+        action()
         _checkpoint(state, home, plan, journal, name)
     _check_checkpoint(home, plan, journal)
     previous = journal.copy()
@@ -644,7 +644,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
                     "model_selection": "preserved"}
         if saved["phase"] not in {"started", "router_started", "router_ready",
                                   "provider_added", "provider_enabled", "model_configured",
-                                  "auth_configured", "chatgpt_enabled", "catalog_refreshed",
+                                  "auth_configured", "chatgpt_deferred", "catalog_refreshed",
                                   "picker_configured", "config_written", "hooks_written",
                                   "ladder_written", "ui_written", "skill_written",
                                   "agents_written", "service_installed", "manifest_written"}:

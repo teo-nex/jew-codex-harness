@@ -99,7 +99,7 @@ class LiveVerifyTests(unittest.TestCase):
             def run(command, *, cwd, env, **kwargs):
                 self.assertIn("workspace-write", command)
                 self.assertIn('approval_policy="never"', command)
-                (Path(cwd) / "proof.txt").write_text(live_verify.MANUAL_MARKER + "\n")
+                (Path(cwd) / "proof.txt").write_bytes((live_verify.MANUAL_MARKER + "\n").encode())
                 state = root / "jev-global"
                 state.mkdir()
                 (state / "usage.jsonl").write_text(json.dumps({
