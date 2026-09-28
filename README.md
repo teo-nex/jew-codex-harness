@@ -52,3 +52,7 @@ and never treats subscription credits or a hypothetical baseline as money paid.
 To prepare a reviewable local source archive, follow [the release checklist](docs/RELEASING.md). The packager uses a clean committed tree and verifies the archive before reporting success.
 
 The installer preserves the current default model. Selecting `jev/auto` enables the provider ladder. Existing live profiles require a separately verified migration; this installer will stop without changing them. See [source provenance](ROUTER_FORK.md).
+
+Optional [reasoning profiles](docs/REASONING.md) map Jev's selected effort to
+each destination model during automatic provider fallback. Unknown models keep
+legacy behavior; per-attempt diagnostics distinguish requested and mapped depth.

@@ -99,6 +99,7 @@ from local_runtime import (
 from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
+from reasoning_effort import resolve_model_reasoning_effort
 
 HOME = os.path.expanduser("~")
 ENV_PATH = os.path.join(HOME, ".hermes", ".env")
@@ -2345,6 +2346,10 @@ class Handler(BaseHTTPRequestHandler):
         original_reasoning = (
             dict(payload["reasoning"]) if isinstance(payload.get("reasoning"), dict) else None
         )
+        if effort is None and isinstance(original_reasoning, dict):
+            orig_effort = original_reasoning.get("effort")
+            if orig_effort is not None:
+                effort = orig_effort
         injected_update = None
         self._attempts = []
         last_error = None
@@ -2357,11 +2362,25 @@ class Handler(BaseHTTPRequestHandler):
             if chosen["stage"] == "exhausted":
                 break
             model = chosen["model"]
+            profiles = ladder.config.get("reasoning_profiles")
+            resolved = resolve_model_reasoning_effort(model, effort, profiles)
+            effective_effort = resolved["effective_effort"]
+            # Every retry starts from the client's reasoning, not the previous
+            # provider's mapped value. This is confined to automatic routing.
+            if original_reasoning is None:
+                current_canonical_reasoning = None
+            else:
+                current_canonical_reasoning = dict(original_reasoning)
+                if resolved["status"] == "unsupported":
+                    current_canonical_reasoning.pop("effort", None)
+            payload.pop("reasoning_effort", None)
+            payload.pop("thinking", None)
+
             injected_update, _transport = apply_route_payload(
-                payload, model, effort, original_reasoning, injected_update
+                payload, model, effective_effort, current_canonical_reasoning, injected_update
             )
-            marker = route_marker(model, effort)
-            signature = presentation_signature(payload, {"model": model, "effort": effort})
+            marker = route_marker(model, effective_effort)
+            signature = presentation_signature(payload, {"model": model, "effort": effective_effort})
             external = None if chosen["stage"] == "main" else {
                 "host": os.environ.get("JEV_OMNIROUTE_HOST", "127.0.0.1"),
                 "port": int(os.environ.get("JEV_OMNIROUTE_PORT", "20128")),
@@ -2370,21 +2389,30 @@ class Handler(BaseHTTPRequestHandler):
             }
             status, out_kind, ctype, quota_hit, unwritten, _reset = self._forward(
                 payload, "/v1/responses", stream_requested, debug, marker, model,
-                signature, effort, exact_route=chosen["stage"] == "main", external=external,
+                signature, effective_effort, exact_route=chosen["stage"] == "main", external=external,
                 validate_gonka=chosen["stage"] in ("glm", "deepseek", "wally"),
             )
             attempt = self._attempts[-1]
+            attempt["requested_effort"] = resolved["requested_effort"]
+            attempt["effective_effort"] = resolved["effective_effort"]
+            attempt["reasoning_status"] = resolved["status"]
+            attempt["reasoning_source"] = resolved["source"]
             completed = (status == 200 and attempt.get("terminal_type") == "response.completed"
                          and attempt.get("completion") != "client_disconnected"
                          and not attempt.get("transport_error"))
             if completed:
                 if chosen["stage"] == "plus":
                     ladder.note_success(scope, chosen)
-                remember_cache_model(scope, payload, model, 200, usage=attempt.get("usage"), effort=effort)
+                remember_cache_model(scope, payload, model, 200, usage=attempt.get("usage"), effort=effective_effort)
                 remember_route_lease(scope, payload, step, decision, 200)
                 log_line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                           "policy_version": POLICY_VERSION, "ladder_stage": chosen["stage"],
                           "ladder_account": (chosen["account"] or "")[:8], "model": model,
+                          "effort": effective_effort,
+                          "requested_effort": resolved["requested_effort"],
+                          "effective_effort": resolved["effective_effort"],
+                          "reasoning_status": resolved["status"],
+                          "reasoning_source": resolved["source"],
                           "jev_usage": jev_usage, "attempts": self._attempts,
                           "decision_source": decision_source,
                           "jev_ms": jev_ms,
