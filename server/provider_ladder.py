@@ -6,8 +6,10 @@ from pathlib import Path
 import time
 try:
     from .portable_lock import locked_file
+    from .reasoning_effort import validate_reasoning_profiles
 except ImportError:  # launched as a script from server/
     from portable_lock import locked_file
+    from reasoning_effort import validate_reasoning_profiles
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -40,6 +42,11 @@ def validate_config(value):
                 or len(set(opus_accounts)) != len(opus_accounts)
                 or any(not isinstance(item, str) or item not in gemini for item in opus_accounts)):
             raise ValueError("opus_connection_ids invalid")
+    if "reasoning_profiles" in value:
+        reasoning_profiles = value["reasoning_profiles"]
+        if reasoning_profiles is None or not isinstance(reasoning_profiles, dict):
+            raise ValueError("reasoning_profiles must be an object")
+        value["reasoning_profiles"] = validate_reasoning_profiles(reasoning_profiles)
     return value
 
 

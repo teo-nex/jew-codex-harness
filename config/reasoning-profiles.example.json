@@ -1,0 +1,27 @@
+{
+  "antigravity/gemini-3.8-flash-tiered": {
+    "supported_efforts": ["low", "high"],
+    "effort_map": {
+      "none": "low",
+      "minimal": "low",
+      "medium": "high",
+      "xhigh": "high",
+      "max": "high"
+    }
+  },
+  "gonkagate/deepseek-ai/deepseek-v4-flash-0731": {
+    "supported_efforts": ["low", "medium", "high"],
+    "effort_map": {
+      "none": "low",
+      "minimal": "low",
+      "xhigh": "high",
+      "max": "high"
+    }
+  },
+  "wally/glm-5.3-flash": {
+    "supported_efforts": ["low", "high"]
+  },
+  "example/model-without-effort-control": {
+    "supported": false
+  }
+}
