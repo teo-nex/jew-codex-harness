@@ -1,109 +1,120 @@
 # Jev Agent-First Install Kit
 
-Give this repository to a coding agent and ask it to follow
-[`AGENT_INSTALL.md`](AGENT_INSTALL.md). The agent's own harness can be Codex,
-Claude Code, Gemini CLI, Hermes or another environment; **the only target-client
-adapter included today is Codex**. Instructions for an agent running in another
-harness do not install Codex hooks into that harness. See the
-[adapter contract](docs/ADAPTER-CONTRACT.md) before adding another target.
+This project lets a coding agent set up Jev routing for **Codex**. Jev can choose
+a model and reasoning depth for a task when you select `jev/auto`; you can still
+select a model yourself. The repository includes an installer, an embedded
+router, and checks that report what actually worked on your computer.
 
-This is a **public alpha**. Automatic installation currently supports a fresh
-Codex profile on macOS, Linux and Windows. If the intended profile or router is
-already in use, stop at preflight and report `BLOCKED_MIGRATION`; do not switch
-profiles or replace services to make installation pass. The installer preserves
-the selected default model and does not overwrite an existing profile.
+**Current status: public alpha.** The installer supports a *fresh Codex profile*
+on macOS, Linux, and Windows. It cannot migrate an existing profile or replace
+an existing router. An agent may run inside Codex, Claude Code, Gemini CLI, or
+another coding environment, but the installed integration currently targets
+Codex only.
 
-## Give the repository to an agent
+## Before you start
 
-Send the agent this repository and the following task:
+You need:
 
-> Read `AGENT_INSTALL.md` and `AGENTS.md`. Check whether this host has a fresh
-> Codex profile and free, correctly owned service ports before changing anything.
-> If an existing profile or router would need migration, stop and report the
-> exact blocker; do not choose a different profile for me. For a fresh profile,
-> use the interactive `onboard` flow and enter the Jev key only in its hidden
-> local prompt. Ask whether to use my existing OmniRoute gateway; never install
-> OmniRoute or invent credentials. Then report what the installer verified and
-> guide me through the owner-only steps: review hooks, sign in and explicitly
-> enable native session sharing if needed, select `jev/auto` if I want autorouting,
-> and run the live checks. Do not claim a turnkey install from CI results alone.
+- Codex CLI, Python 3.11+, Node.js 22.19+, npm, and a supported per-user service
+  manager (`launchd`, `systemd --user`, or Windows Task Scheduler).
+- A TypeSafe or OpenRouter API key for Jev's routing decisions. The installer
+  asks for it in a hidden terminal prompt and stores it outside this repository.
+- A fresh Codex profile and free service ports. If your intended profile or
+  router is already in use, the agent should stop and explain the conflict.
+- A Codex/ChatGPT sign-in if you plan to use native GPT models. You complete
+  sign-in and approve session sharing yourself after installation.
 
-The intended flow is:
+**OmniRoute is optional.** If you already have a working OmniRoute gateway, the
+installer can connect to it using protected auth and provider-ladder files. If
+you do not have one, choose **no** and use native Codex routing. This installer
+does not create an OmniRoute gateway or provider accounts.
 
-1. **Preflight:** identify the target client/profile, check ports, services,
-   disk space and prerequisites. Existing-profile migration is unsupported.
-2. **Choose routing:** `onboard` asks for TypeSafe or OpenRouter as the Jev
-   decision provider, then whether to use an already-configured OmniRoute
-   gateway. OmniRoute is optional; the installer does not install it.
-3. **Enter the Jev key locally:** the wizard checks for structural blockers
-   before showing a hidden terminal prompt. It stores the key in a protected
-   file outside the repository. Never paste credentials into chat or Git.
-4. **Install and verify locally:** `onboard` runs preparation, offline smoke,
-   install dry-run, installation, local file/service checks and a typed Jev
-   decision. This still does not prove that a fresh Codex session loaded hooks
-   or completed a real `jev/auto` task.
-5. **Owner actions and live check:** review and trust hooks with `/hooks` in a
-   fresh Codex session. Sign in and explicitly opt in to native session sharing
-   if using native GPT routing. Select `jev/auto` if you want autorouting, then
-   run `verify --live --manual-model MODEL_ID` with a model available to that
-   profile. Report skipped Browser/Computer/Compact checks as untested.
+## Give it to an agent
 
-## Run the interactive installer yourself
+Send the agent the repository link and this request:
 
-Clone the repository, then run the command for your shell from its root:
+> Install `https://github.com/teo-nex/jew-codex-harness` for a fresh Codex
+> profile. Read `AGENT_INSTALL.md` and `AGENTS.md` first. Check my intended
+> profile, service ports, prerequisites, and disk space before changing anything.
+> Stop and tell me if migration of an existing profile or router is needed;
+> do not silently pick another profile. Run the interactive `onboard` installer
+> for a fresh profile. Ask me whether I already have OmniRoute, and let me enter
+> the TypeSafe or OpenRouter key only in the local hidden prompt, never in chat.
+> Afterwards, tell me what passed, what remains untested, and which steps I
+> must complete in Codex before calling the installation working.
+
+The agent performs preflight, preparation, a dry run, installation, and local
+verification. It cannot approve Codex hooks, sign in to your account, or grant
+native session sharing on your behalf. Those steps require your review.
+
+## Run it yourself
+
+On macOS or Linux:
 
 ```sh
-# macOS / Linux
 git clone https://github.com/teo-nex/jew-codex-harness.git
 cd jew-codex-harness
 ./install.sh onboard
 ```
 
+On Windows, in PowerShell:
+
 ```powershell
-# Windows PowerShell
 git clone https://github.com/teo-nex/jew-codex-harness.git
 Set-Location jew-codex-harness
 .\install.ps1 onboard
 ```
 
-The wizard requires a **new Codex profile** and asks for the Jev provider, key,
-and optional existing OmniRoute files. It does not create provider accounts or
-install OmniRoute. See the full [installation guide](docs/INSTALL.md) for
-prerequisites, protected-file setup, non-interactive commands and rollback.
+The wizard asks for a fresh profile path, whether your Jev key is from TypeSafe
+or OpenRouter, and whether to use an existing OmniRoute gateway. It checks for
+structural blockers before asking for the key. Keep the checkout at a stable
+path: installed services and hooks refer to it. See the [installation guide](docs/INSTALL.md)
+for non-interactive commands, protected files, and rollback.
 
-## What works, and what remains unproven
+## Finish in Codex
 
-The [GitHub Actions CI](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml)
-includes synthetic-key fresh-profile install smoke on macOS, Linux and Windows.
-Passing CI proves the tested
-offline install path and owned-service rollback on hosted runners; the synthetic
-key cannot authenticate to a provider. It does **not** prove a subscriber's
-first install, Codex OAuth, hook trust in a fresh interactive client, live model
-quality, or interactive worker windows. See the
-[support matrix](docs/SUPPORT.md) and [CI scope](docs/CI.md).
+1. Open a fresh Codex session in the installed profile. Use `/hooks` to review
+   and trust the new hooks.
+2. Sign in if needed. For native GPT routing, explicitly enable session sharing
+   for this profile as described in the [installation guide](docs/INSTALL.md).
+3. Select `jev/auto` when you want automatic routing. Your previous default
+   model is preserved, so the installer does not switch you to `jev/auto`.
+4. From the repository root, run
+   `python3 -m harness.cli --codex-home /path/to/new-profile verify --live --manual-model MODEL_ID`
+   with a model available to that profile (`py -3` instead of `python3` on
+   Windows). The [installation guide](docs/INSTALL.md) explains what each
+   check proves.
 
-CanvasTTY is optional integration, not an installer target. On macOS, the
-CanvasTTY browser broker is registered only when its helper is available. The
-native `jev-workers` path is CanvasTTY-specific; Linux and Windows currently
-expose read-only CLI worker tasks, and the CanvasTTY browser broker is
-unavailable there. This kit does not install CanvasTTY or create visible
-CanvasTTY terminal windows.
+A green installer result means the local files and services passed their checks.
+Call the setup **verified** only after a real response completes through the
+intended Codex profile. Browser, Computer, and context-compaction behavior need
+separate checks in a client that exposes those capabilities.
 
-The root project is licensed under [MIT](LICENSE). The embedded router retains
-its own [MIT license](router/LICENSE) and attribution in [`router/NOTICE.md`](router/NOTICE.md).
-Credential values, OAuth files, provider state and runtime logs belong outside
-Git; the CI repository-hygiene check rejects tracked secret paths and runtime
-artifacts.
+## What is included
 
-After real work, use the installer's `report_command` to produce its
-24-hour API-price comparison. It is a same-token price estimate, not money paid,
-subscription savings or proof of equal task quality.
+- A Codex adapter and installer for fresh profiles on macOS, Linux, and Windows.
+- A local Jev router with native Codex routing and an optional OmniRoute
+  provider ladder. [Reasoning profiles](docs/REASONING.md) can map Jev's chosen
+  effort to supported levels on each configured destination model.
+- An optional CanvasTTY browser broker on macOS when its helper is already
+  installed. CanvasTTY and visible terminal workers are not installed by this kit.
+- A 24-hour API-price comparison after real routed work. It estimates what the
+  observed tokens would cost at listed API prices; it does not measure money
+  paid, subscription savings, or equal task quality.
 
-The installer preserves the current default model. Selecting `jev/auto` enables
-the provider ladder. Existing live profiles require a separately verified
-migration; this installer stops without changing them. See
-[source provenance](ROUTER_FORK.md).
+The [support matrix](docs/SUPPORT.md) shows what has and has not been tested on
+each operating system. [GitHub Actions](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml)
+runs offline installation checks with synthetic credentials on all three. CI
+does not prove a first installation with your credentials, hook trust, OAuth,
+or a completed live model response.
 
-Optional [reasoning profiles](docs/REASONING.md) map Jev's selected effort to
-each destination model during automatic provider fallback. Unknown models keep
-legacy behavior; per-attempt diagnostics distinguish requested and mapped depth.
+## More information
+
+- [Agent installation protocol](AGENT_INSTALL.md) and [adapter contract](docs/ADAPTER-CONTRACT.md)
+- [Installation details](docs/INSTALL.md), [CI scope](docs/CI.md), and [support matrix](docs/SUPPORT.md)
+- [Reasoning effort routing](docs/REASONING.md) and [source provenance](ROUTER_FORK.md)
+- [Security policy](SECURITY.md) and [contributing guide](CONTRIBUTING.md)
+
+The root project is [MIT licensed](LICENSE). The embedded router retains its
+own [MIT license](router/LICENSE) and [attribution](router/NOTICE.md). Keep
+API keys, OAuth files, provider state, and runtime logs out of Git.
