@@ -48,6 +48,14 @@ provider accounts. For non-interactive work, use protected key **file paths**
 and the exact `doctor → prepare → install --dry-run → install → verify` sequence
 in `docs/INSTALL.md`. Read installed CLI `--help` before changing syntax.
 
+`onboard` is the interactive path: it asks for the new Codex profile and routing
+choice, checks structural blockers before collecting the Jev key, then prepares,
+dry-runs, installs and performs local checks plus one typed Jev decision. If
+preflight finds an existing profile/router conflict, stop and report
+`BLOCKED_MIGRATION`; do not select another profile or replace a service without
+the owner's direction. The key prompt is local and hidden. For OmniRoute, ask
+only for paths to an already-configured gateway and protected ladder/auth files.
+
 The installer preserves the chosen default Codex model. Autorouting applies
 only when `jev/auto` is selected. A manually selected model keeps ordinary
 Codex Tool Use; Jev UI helpers and compact carry remain separate. Do not claim
@@ -82,6 +90,15 @@ pass. Keep generated logs and reports outside Git. The API-cost report is a
 same-token price comparison for observed `jev/auto` attempts, not a charge to
 the user's subscription or evidence of equal task quality. Exclude synthetic
 smoke calls from any public savings claim.
+
+After installation, the account owner must review and trust the hooks with
+`/hooks` in a fresh Codex session. Native GPT routing also requires the owner to
+sign in and explicitly enable native session sharing for this profile. The
+installer preserves the selected default model; autorouting is active only
+after `jev/auto` is selected. CanvasTTY is optional: the browser broker is
+available only when its macOS helper is present; native visible worker windows
+are not part of the cross-platform installer. Linux and Windows worker support
+is read-only CLI only, and the CanvasTTY browser broker is unavailable there.
 
 ## 5. Return one short installation report
 
