@@ -16,6 +16,10 @@ tests under `tests/` and `server/` across Ubuntu, macOS, and Windows with Python
 The router lane runs `npm ci`, an isolated Node configuration smoke (`scripts/smoke_config_offline.py`),
 the repository's static check (`npm run check`), and focused tests for error-chain,
 fetch transport, and transport-failure behavior under Node 22.19 and Python 3.11.
+It also runs the full embedded-router test suite and starts a fresh real Codex
+CLI against two synthetic loopback routes: the first returns 503, the second
+must complete the exact marker with a matching fresh thread scope. File
+enumeration for the Node suite is portable to Windows without shell globbing.
 The router lane does not install browser engines or provider credentials.
 
 ### Install smoke matrix (`install-smoke`)
@@ -52,10 +56,15 @@ Target host verification requires independent client and live acceptance as defi
 After a green GitHub-hosted run, CI would prove only the following properties:
 
 1. **Source compilation & test suites:** Python modules compile cleanly without syntax errors; unit tests in `tests/` and `server/` pass on Python 3.11 and 3.13 across Linux, macOS, and Windows.
-2. **Router integrity:** Router dependencies install cleanly under Node 22.19; TypeScript/type checks pass; routing and transport failure unit tests pass.
+2. **Router integrity:** Router dependencies install cleanly under Node 22.19; repository static checks and the full embedded-router regression suite pass.
 3. **Offline configuration generation:** Offline provider setup, model registry, local transport key generation, and catalog refresh succeed in a temporary, isolated profile directory.
 4. **Clean repository hygiene & packaging:** No secrets, credentials, logs, or runtime state are tracked; clean release archives build deterministically.
 5. **Install smoke mechanics:** The real installer completes in a fresh profile, owned files and service start, loopback `/health` responds, and the owned Jev service is rolled back on each runner OS. On Windows, the base router and synthetic profile are retained until the hosted VM is disposed because exact ownership of that router task has not been proven. The synthetic key cannot authenticate a live provider request. Native session sharing remains pending explicit owner opt-in.
+6. **Fresh-client controlled recovery:** A new real Codex CLI process accepts
+   the synthetic completed response after a 503 and route change. Exactly two
+   loopback requests and the matching thread scope are required. This proves
+   the client/relay transport contract, not real-provider availability or
+   internal reasoning enforcement.
 
 Only a green Actions run for the published commit is cross-platform offline
 installation evidence. A red job is an installation failure to investigate,
