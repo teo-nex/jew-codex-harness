@@ -37,3 +37,49 @@ deployment into the user's running profile.
 
 Existing profiles, credentials, services and user terminals were not modified.
 Live acceptance is explicit opt-in; no live provider generation was run.
+
+## Published-source verification
+
+The changes were published to `main` on 2026-10-06 with each feature kept in
+its own commit. GitHub API publication produced new commit IDs; every published
+Git tree was checked against its local original before advancing `main`.
+
+The [first hosted run](https://github.com/teo-nex/jew-codex-harness/actions/runs/37383676900)
+exposed two test-fixture problems: an unmocked second Windows ACL check, and
+competing idle/total deadlines in the network timing test. The fixture-only
+correction preserves production ACL enforcement and request limits. Added
+negative credential coverage and a deterministic deadline/stale-timer check.
+
+After that correction, local harness tests ran 175 tests (174 passed, one
+platform skip) and server tests ran 258 tests (257 passed, one platform skip).
+The 32 focused routing/transport and seven browser broker tests also passed.
+A new real Codex process again accepted the synthetic `503 -> 200` recovery
+with two requests and a matching fresh scope; live generation remained off.
+
+The hosted workflow now also runs the full Node regression suite and the
+fresh-client recovery on Linux, macOS and Windows. Consult the
+[published-commit Actions run](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml)
+for its status; configured checks or a successful local run are not a claim
+that hosted checks passed. Real-provider identity and reasoning enforcement
+remain outside these synthetic checks.
+
+## Bounded-client correction
+
+The [expanded run](https://github.com/teo-nex/jew-codex-harness/actions/runs/37384636775)
+passed all six Python jobs, all three install/rollback smoke jobs and the full
+router/fresh-client jobs on Linux and macOS. The Windows fresh-client step
+outlived its subprocess timeout; its exact cause was not established from
+the still-running job. It must not be recorded as a passed client check.
+
+Verification runners now close stdin, capture output in files instead of
+inherited pipes, and terminate only their owned process tree on timeout.
+The synthetic client preserves Windows system variables case-insensitively
+while assigning all profile/app-data paths to its disposable fixture. CI adds
+a separate three-minute ceiling for this step. No live profile is changed.
+
+Local regression after this correction: 180 harness tests (179 passed, one
+platform skip), 259 server tests (258 passed, one platform skip), and a real
+fresh Codex recovery with exactly two synthetic requests, `[503, 200]`, the
+expected marker and a matching thread scope. Process tests cover EOF on stdin,
+descendant cleanup after timeout, inherited output handles, nonzero exit codes
+and bounded capture. Hosted Windows acceptance still requires the new run.

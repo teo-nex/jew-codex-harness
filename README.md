@@ -118,6 +118,8 @@ or a completed live model response.
 
 Run commands from the checkout with `python -m harness.cli --codex-home PROFILE`.
 Use `py -3` instead of `python` on Windows.
+For catalog queries, also supply `--omniroute-auth-file FILE` before the
+subcommand, or set `JEV_OMNIROUTE_AUTH_FILE` to that protected file's path.
 
 | Control | Command or configuration |
 | --- | --- |
