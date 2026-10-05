@@ -23,6 +23,52 @@ from provider_ladder import Ladder
 MARKER = "JEV_RECOVERY_ACCEPTED"
 
 
+class FixtureServer(ThreadingHTTPServer):
+    daemon_threads = True
+
+    def __init__(self, *args):
+        self.pending = set()
+        self.condition = threading.Condition()
+        super().__init__(*args)
+
+    def process_request(self, request, address):
+        with self.condition:
+            self.pending.add(request)
+        try:
+            super().process_request(request, address)
+        except BaseException:
+            with self.condition:
+                self.pending.discard(request)
+            raise
+
+    def process_request_thread(self, request, address):
+        try:
+            super().process_request_thread(request, address)
+        finally:
+            with self.condition:
+                self.pending.discard(request)
+                self.condition.notify_all()
+
+    def stop(self):
+        self.shutdown()
+        self.server_close()
+        with self.condition:
+            if not self.condition.wait_for(lambda: not self.pending, timeout=2):
+                raise OSError("owned fixture handlers did not finish")
+
+
+def close_servers(servers, threads):
+    for index, server in enumerate(servers):
+        if index < len(threads):
+            server.stop()
+        else:
+            server.server_close()
+    for thread in threads:
+        thread.join(2)
+    servers.clear()
+    threads.clear()
+
+
 def response_stream():
     item = {"id": "msg_fixture", "type": "message", "role": "assistant", "status": "completed",
             "content": [{"type": "output_text", "text": MARKER, "annotations": []}]}
@@ -48,6 +94,7 @@ def run(executable=None):
     if not codex:
         return {"ok": False, "status": "blocked", "reason": "codex executable unavailable"}
     requests, records, servers, threads = [], [], [], []
+    root = None
     stage = "setup"
     logged = threading.Event()
     def record(row):
@@ -72,9 +119,9 @@ def run(executable=None):
             home, work, state = root / "profile", root / "work", root / "state"
             for path in (home, work, state):
                 path.mkdir(mode=0o700)
-            gateway = ThreadingHTTPServer(("127.0.0.1", 0), Gateway)
+            gateway = FixtureServer(("127.0.0.1", 0), Gateway)
             servers.append(gateway)
-            adapter = ThreadingHTTPServer(("127.0.0.1", 0), jev.Handler)
+            adapter = FixtureServer(("127.0.0.1", 0), jev.Handler)
             servers.append(adapter)
             for server in servers:
                 server.daemon_threads = True
@@ -95,6 +142,9 @@ def run(executable=None):
             stack.enter_context(mock.patch.object(jev, "local_secret", return_value="fixture"))
             stack.enter_context(mock.patch.object(jev, "load_key", return_value=None))
             stack.enter_context(mock.patch.object(jev, "log_line", side_effect=record))
+            # Stop owned handlers before restoring globals or deleting their
+            # files. Windows refuses deletion while a handler holds a file.
+            stack.callback(close_servers, servers, threads)
             content = ('model = "jev/auto"\nmodel_provider = "fixture"\n'
                        '[model_providers.fixture]\nname = "Synthetic recovery"\nwire_api = "responses"\n'
                        f'base_url = "http://127.0.0.1:{adapter.server_port}/v1"\n'
@@ -150,16 +200,17 @@ def run(executable=None):
         return {"ok": False, "status": "failed", "reason": "synthetic client timed out after 120 seconds",
                 "provider_requests": len(requests), "live_provider_proof": False}
     except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        area = next((name for name in ("profile", "state", "work")
+                     if root is not None and getattr(exc, "filename", None) and
+                     Path(exc.filename).is_relative_to(root / name)), "unknown")
+        kind = ("database" if str(getattr(exc, "filename", "")).endswith(
+            (".sqlite", ".sqlite-wal", ".sqlite-shm")) else "other")
         return {"ok": False, "status": "failed", "reason": "synthetic fresh-client recovery failed",
                 "stage": stage, "error_kind": type(exc).__name__,
-                "error_errno": getattr(exc, "errno", None), "provider_requests": len(requests)}
+                "error_errno": getattr(exc, "errno", None), "cleanup_area": area, "cleanup_kind": kind,
+                "provider_requests": len(requests)}
     finally:
-        for index, server in enumerate(servers):
-            if index < len(threads):
-                server.shutdown()
-            server.server_close()
-        for thread in threads:
-            thread.join(2)
+        close_servers(servers, threads)
 
 
 if __name__ == "__main__":

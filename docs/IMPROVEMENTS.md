@@ -94,6 +94,14 @@ the total deadline; all 260 server tests passed locally (one platform skip).
 
 Fresh-client failure reports expose only a fixed stage, exception class and
 numeric OS error, never raw client stderr, prompts or credential material.
+Cleanup diagnostics add only fixed fixture-area and file-kind labels.
 Windows CI runs three independent recovery processes with new disposable
 profiles; failures are not retried or hidden. Its three-minute step ceiling
 remains in addition to each client's bounded timeout.
+
+The repeated Windows run exposed `PermissionError` during temporary-directory
+cleanup after both provider requests, not a timeout or missing route. Owned
+fixture servers now stop and wait for their request handlers before restoring
+patched globals or removing files. Tests enforce this teardown order and check
+that partial server startup closes sockets without waiting for an unstarted
+server. The follow-up hosted run must still pass all repeated Windows checks.
