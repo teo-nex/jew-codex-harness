@@ -1,0 +1,16 @@
+{
+  "version": 2,
+  "providers": [
+    {
+      "id": "preferred",
+      "transport": "omniroute",
+      "model": "REPLACE_WITH_EXACT_OMNIROUTE_MODEL_ID",
+      "connection_ids": ["REPLACE_WITH_VERIFIED_CONNECTION_ID"]
+    },
+    {
+      "id": "native",
+      "transport": "native"
+    }
+  ],
+  "reasoning_profiles": {}
+}

@@ -9,6 +9,8 @@ routing are unchanged. There is no additional model call for effort mapping.
 
 Add a `reasoning_profiles` object to the existing protected ladder JSON passed
 to the installer via `--ladder-config` (runtime `JEV_LADDER_CONFIG`).
+Both the [ordered version 2 configuration](PROVIDERS.md) and legacy ladder
+accept it; the interactive wizard can collect supported levels per destination.
 Keys are exact destination IDs, not patterns. Example:
 
 ```json
@@ -36,7 +38,8 @@ Every fallback resolves the original requested depth again; a previous
 provider's mapping cannot leak into the next attempt.
 
 Attempts record `requested_effort`, `effective_effort`, `reasoning_status`
-and `reasoning_source`. These diagnostics are not sent as provider API fields.
+and `reasoning_source`, plus `selected_model` separately from the actual
+destination `model`. These diagnostics are not sent as provider API fields.
 Configured support is an operator assertion, not provider verification.
 Keep effort-suffixed model aliases consistent with their configured profiles.
 

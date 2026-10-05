@@ -2354,13 +2354,21 @@ class Handler(BaseHTTPRequestHandler):
         self._attempts = []
         last_error = None
         force_main_for_call = omniroute_cannot_represent_tool_search_history(payload)
-        for _ in range(len(ladder.config["gemini_connection_ids"])
-                       + len(ladder.config.get("opus_connection_ids") or []) + 5):
-            chosen = ({"stage": "main", "model": ladder.config["main_model"],
-                       "account": None, "effort": effort}
-                      if force_main_for_call else ladder.route(scope, base_model, effort))
+        for attempt_index in range(ladder.attempt_limit + 1):
+            forced_native = force_main_for_call
+            try:
+                chosen = (ladder.native_route(base_model, effort) if force_main_for_call
+                          else ladder.route(scope, base_model, effort,
+                                            recover_primary=attempt_index == 0))
+            except (OSError, ValueError, RuntimeError) as exc:
+                return self._json(503, {"error": {"message": "provider ladder state unavailable",
+                                               "type": type(exc).__name__}})
+            if chosen is None:
+                return self._json(400, {"error": {"message":
+                    "This request requires a native route; none is configured in the provider sequence"}})
             if chosen["stage"] == "exhausted":
                 break
+            native = chosen.get("transport", "native" if chosen["stage"] == "main" else "omniroute") == "native"
             model = chosen["model"]
             profiles = ladder.config.get("reasoning_profiles")
             resolved = resolve_model_reasoning_effort(model, effort, profiles)
@@ -2381,7 +2389,7 @@ class Handler(BaseHTTPRequestHandler):
             )
             marker = route_marker(model, effective_effort)
             signature = presentation_signature(payload, {"model": model, "effort": effective_effort})
-            external = None if chosen["stage"] == "main" else {
+            external = None if native else {
                 "host": os.environ.get("JEV_OMNIROUTE_HOST", "127.0.0.1"),
                 "port": int(os.environ.get("JEV_OMNIROUTE_PORT", "20128")),
                 "key": external_key,
@@ -2389,10 +2397,11 @@ class Handler(BaseHTTPRequestHandler):
             }
             status, out_kind, ctype, quota_hit, unwritten, _reset = self._forward(
                 payload, "/v1/responses", stream_requested, debug, marker, model,
-                signature, effective_effort, exact_route=chosen["stage"] == "main", external=external,
-                validate_gonka=chosen["stage"] in ("glm", "deepseek", "wally"),
+                signature, effective_effort, exact_route=native, external=external,
+                validate_gonka=model.startswith(("gonkagate/", "gonka/", "wally/")),
             )
             attempt = self._attempts[-1]
+            attempt["selected_model"] = base_model
             attempt["requested_effort"] = resolved["requested_effort"]
             attempt["effective_effort"] = resolved["effective_effort"]
             attempt["reasoning_status"] = resolved["status"]
@@ -2401,13 +2410,13 @@ class Handler(BaseHTTPRequestHandler):
                          and attempt.get("completion") != "client_disconnected"
                          and not attempt.get("transport_error"))
             if completed:
-                if chosen["stage"] == "plus":
-                    ladder.note_success(scope, chosen)
+                ladder.note_success(scope, chosen)
                 remember_cache_model(scope, payload, model, 200, usage=attempt.get("usage"), effort=effective_effort)
                 remember_route_lease(scope, payload, step, decision, 200)
                 log_line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                           "policy_version": POLICY_VERSION, "ladder_stage": chosen["stage"],
                           "ladder_account": (chosen["account"] or "")[:8], "model": model,
+                          "selected_model": base_model,
                           "effort": effective_effort,
                           "requested_effort": resolved["requested_effort"],
                           "effective_effort": resolved["effective_effort"],
@@ -2419,21 +2428,22 @@ class Handler(BaseHTTPRequestHandler):
                           "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                           "status": status, "cache_scope": scope, "stream": stream_requested})
                 return
-            if status == 400 and not quota_hit and chosen["stage"] in ("gemini", "opus", "wally"):
+            if (ladder.providers is None and status == 400 and not quota_hit
+                    and chosen["stage"] in ("gemini", "opus", "wally")):
                 # This request shape failed before generation. Trying every
                 # sticky account with the same payload wastes time and can
                 # falsely exhaust a healthy account. Gonka's two fixed stages
                 # instead advance through the requested DeepSeek/Wally order.
                 # Retry these account-scoped stages on the native model only.
                 force_main_for_call = True
-            elif chosen["stage"] != "main":
+            elif not forced_native and (ladder.providers is not None or not native):
                 reason = "quota" if quota_hit else (
                     "invalid_response" if status == 200 else "unavailable"
                 )
                 cooldown = (900 if status in (400, 401, 403)
                             else 300 if quota_hit else 30)
                 ladder.advance(scope, chosen, reason,
-                               reset_at=_reset if chosen["stage"] == "plus" else None,
+                               reset_at=_reset,
                                cooldown_seconds=cooldown)
             if unwritten is None:
                 # A partial stream may already be visible. Continue this thread
@@ -2445,7 +2455,7 @@ class Handler(BaseHTTPRequestHandler):
                           "cache_scope": scope, "stream": stream_requested})
                 return
             last_error = (status, ctype, unwritten)
-            if chosen["stage"] == "main":
+            if forced_native or (native and ladder.providers is None):
                 break
         status, ctype, body = last_error or (503, "application/json", b'{"error":{"message":"provider ladder exhausted"}}')
         log_line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),

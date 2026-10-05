@@ -11,7 +11,7 @@ over. The router listens on loopback only.
 
 - Python 3.11+, Node.js 22.19+, npm, Codex CLI and a supported per-user service manager (`launchd`, `systemd --user`, or Windows Task Scheduler).
 - A Jev decision key from TypeSafe or OpenRouter. `onboard` can read it from a hidden terminal prompt and write a protected file; non-interactive installs supply only the protected file **path**.
-- For the optional external ladder: an existing OmniRoute gateway auth JSON in a protected file with `omniroute.key`, plus a private provider ladder JSON based on `config/ladder.example.json`. Supply both paths or neither. Store verified connection IDs and model IDs outside Git.
+- For optional OmniRoute routing: an existing gateway auth JSON in a protected file with `omniroute.key`. The wizard can create your provider sequence; non-interactive installation supplies a private JSON based on `config/providers.example.json`. See [provider order and model mappings](PROVIDERS.md). Store verified connection IDs and model IDs outside Git. The legacy `config/ladder.example.json` remains supported.
 - A Codex/ChatGPT login for native GPT routing. The account owner must complete
   OAuth and explicitly opt in to native session sharing after installation.
 
@@ -25,7 +25,10 @@ On Windows, use `./install.ps1 onboard` in PowerShell. The wizard asks for a
 fresh Codex profile, `typesafe` or `openrouter` for Jev, the hidden decision
 API key, and whether to use an **existing** OmniRoute gateway. It never
 installs OmniRoute or creates its accounts. Selecting OmniRoute requires
-protected ladder and gateway-auth files. The key is written outside the repo
+a protected gateway-auth file; choose `create` to enter your provider/account
+order and exact model IDs, or `file` to reuse a protected configuration. A new
+configuration is saved privately outside the repo before validated installation.
+The key is written outside the repo
 with private permissions; a failed preflight asks for no key. The wizard
 reports local verification and the remaining hook-trust step separately.
 

@@ -55,6 +55,22 @@ class InstallCoreTests(unittest.TestCase):
     def test_doctor_accepts_clean_profile(self):
         self.assertTrue(self._doctor()["ready"])
 
+    def test_ordered_config_is_validated_and_installed_without_rewriting_order(self):
+        config = {"version": 2, "providers": [
+            {"id": "preferred", "model": "vendor/chosen", "connection_ids": ["b", "a"]},
+            {"id": "native", "transport": "native"}],
+            "reasoning_profiles": {"vendor/chosen": {"supported_efforts": ["low", "high"]}}}
+        self.ladder.write_text(json.dumps(config))
+        self.assertTrue(self._doctor()["ready"])
+        self.assertTrue(self._installed()["installed"])
+        copied = self.home / "jev-harness/ladder-config.json"
+        self.assertEqual(json.loads(copied.read_text()), config)
+        from server.provider_ladder import Ladder
+        route = Ladder(json.loads(copied.read_text()), self.home / "state.json").route(
+            "thread", "gpt-6-astra", "xhigh")
+        self.assertEqual((route["stage"], route["model"], route["account"]),
+                         ("preferred", "vendor/chosen", "b"))
+
     def test_prepare_overrides_inherited_router_identity(self):
         inherited = {"MODEL_ROUTER_STATE_DIR": str(self.root / "foreign-state"),
                      "MODEL_ROUTER_TARGET": "claude"}

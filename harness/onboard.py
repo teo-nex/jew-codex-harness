@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import getpass
 import hashlib
+import json
 import os
 from pathlib import Path
 import shlex
@@ -12,6 +13,52 @@ import sys
 
 from . import core
 from . import live_verify
+from server.provider_ladder import NATIVE_MODELS, validate_config
+
+
+def _provider_sequence(read) -> dict:
+    try:
+        count = int(_answer(read, "Number of providers in fallback order (1-32)", "1"))
+    except ValueError as exc:
+        raise core.InstallError("Provider count must be an integer") from exc
+    if not 1 <= count <= 32:
+        raise core.InstallError("Provider count must be between 1 and 32")
+    providers, profiles = [], {}
+    for index in range(count):
+        prefix = f"Provider {index + 1}"
+        identity = _answer(read, prefix + " name", f"provider-{index + 1}")
+        transport = _answer(read, prefix + " transport (omniroute/native)", "omniroute").lower()
+        mode = _answer(read, prefix + " model selection (fixed/jev)",
+                       "jev" if transport == "native" else "fixed").lower()
+        provider = {"id": identity, "transport": transport}
+        if mode == "fixed":
+            provider["model"] = _answer(read, prefix + " exact model ID", "")
+        elif mode == "jev":
+            provider["models"] = {
+                model: _answer(read, prefix + " destination for " + model,
+                               model if transport == "native" else "")
+                for model in NATIVE_MODELS
+            }
+        else:
+            raise core.InstallError("Model selection must be fixed or jev")
+        if transport == "omniroute":
+            accounts = _answer(read, prefix + " connection IDs in order (comma-separated, optional)", "")
+            if accounts:
+                provider["connection_ids"] = [item.strip() for item in accounts.split(",")]
+            models = [provider["model"]] if mode == "fixed" else provider["models"].values()
+            for model in dict.fromkeys(models):
+                if model in profiles:
+                    continue
+                levels = _answer(read, model + " reasoning levels (unknown/unsupported/comma-separated levels)", "unknown")
+                if levels == "unsupported":
+                    profiles[model] = {"supported": False}
+                elif levels != "unknown":
+                    profiles[model] = {"supported_efforts": [item.strip() for item in levels.split(",")]}
+        providers.append(provider)
+    try:
+        return validate_config({"version": 2, "providers": providers, "reasoning_profiles": profiles})
+    except ValueError as exc:
+        raise core.InstallError(str(exc)) from exc
 
 
 def _offline_smoke(repo: Path) -> None:
@@ -65,8 +112,6 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
     if default_provider not in ("typesafe", "openrouter"):
         raise core.InstallError("Jev provider must be typesafe or openrouter")
     default_home = codex_home.expanduser().resolve()
-    if default_home.exists() and any(default_home.iterdir()):
-        default_home = Path.home() / ".codex-jev"
     home = Path(_answer(read, "Fresh Codex profile path", str(default_home))).expanduser().resolve()
     selected = _answer(read, "Jev key provider (typesafe/openrouter)", default_provider).lower()
     if selected not in ("typesafe", "openrouter"):
@@ -75,23 +120,33 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
     external = _answer(read, "Use an existing OmniRoute gateway? (yes/no)", external_default).lower()
     if external not in ("yes", "no"):
         raise core.InstallError("Choose yes or no for OmniRoute")
+    generated_config = None
     if external == "yes":
-        ladder = ladder or Path(_answer(read, "Protected ladder config path", ""))
         omni = omni or Path(_answer(read, "Protected OmniRoute auth path", ""))
-        if str(ladder) == "." or str(omni) == ".":
+        if ladder is None:
+            sequence_mode = _answer(read, "Provider sequence (create/file)", "create").lower()
+            if sequence_mode == "create":
+                generated_config = _provider_sequence(read)
+            elif sequence_mode == "file":
+                ladder = Path(_answer(read, "Protected provider config path", ""))
+            else:
+                raise core.InstallError("Choose create or file for the provider sequence")
+        if str(omni) == "." or (generated_config is None and str(ladder) == "."):
             raise core.InstallError("Both OmniRoute paths are required")
+        if generated_config is not None:
+            core.protected_file(omni, "OmniRoute auth file")
     else:
         ladder = omni = None
 
     # Refuse structural conflicts before collecting or writing a credential.
+    preliminary = core.doctor(repo, home, ladder, omni if ladder is not None else None, key_file, port,
+                              jev_provider=selected)
+    blockers = [issue for issue in preliminary["issues"]
+                if issue != "Set protected Jev decision key path"]
+    if blockers:
+        return {"ready": False, "issues": blockers, "key_written": False,
+                "codex_home": str(home)}
     if key_file is None:
-        preliminary = core.doctor(repo, home, ladder, omni, None, port,
-                                  jev_provider=selected)
-        blockers = [issue for issue in preliminary["issues"]
-                    if issue != "Set protected Jev decision key path"]
-        if blockers:
-            return {"ready": False, "issues": blockers, "key_written": False,
-                    "codex_home": str(home)}
         key_text = secret(f"{selected} Jev API key (hidden): ").strip()
         if (not key_text or len(key_text) > 4096
                 or any(ch.isspace() or ord(ch) < 0x20 for ch in key_text)):
@@ -105,7 +160,14 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
     else:
         created_key = None
 
+    created_ladder = None
     try:
+        if generated_config is not None:
+            ladder = _new_key_path(home, selected, key_root).with_name("providers.json")
+            if ladder.exists() or ladder.is_symlink():
+                raise core.InstallError("Provider config exists; use --ladder-config to reuse it")
+            core._atomic(ladder, (json.dumps(generated_config, indent=2) + "\n").encode())
+            created_ladder = ladder
         report = core.doctor(repo, home, ladder, omni, key_file, port,
                              jev_provider=selected)
         if not report["ready"]:
@@ -127,6 +189,9 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
                                            "jev_decision_failed" if local_ready else "local_verification_failed"),
                 "codex_home": str(home), "jev_provider": selected,
                 "ladder_mode": "active" if external == "yes" else "native",
+                "ladder_config": str(ladder) if ladder is not None else None,
+                "provider_order": ([p["id"] for p in generated_config["providers"]]
+                                   if generated_config is not None else None),
                 "launch_command": _launch_command(home),
                 "report_command": _report_command(repo, home),
                 "key_file": str(key_file), "dry_run": dry_run,
@@ -138,6 +203,7 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
     finally:
         # A failed preflight should not leave a newly supplied secret behind.
         # Once installation has a journal, retain it for an exact resume.
-        if (created_key is not None and not (home / "jev-harness/journal.json").exists()
-                and created_key.is_file() and not created_key.is_symlink()):
-            created_key.unlink()
+        if not (home / "jev-harness/journal.json").exists():
+            for created in (created_key, created_ladder):
+                if created is not None and created.is_file() and not created.is_symlink():
+                    created.unlink()

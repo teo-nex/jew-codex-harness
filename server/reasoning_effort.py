@@ -32,7 +32,7 @@ def validate_reasoning_profiles(profiles: Any) -> Dict[str, Any]:
 
     validated: Dict[str, Any] = {}
     for model_id, profile in profiles.items():
-        if not isinstance(model_id, str) or not model_id.strip():
+        if not isinstance(model_id, str) or not model_id.strip() or model_id != model_id.strip():
             raise ValueError("reasoning_profiles keys must be non-empty strings")
         if not isinstance(profile, dict):
             raise ValueError(f"reasoning_profile for {model_id!r} must be an object")

@@ -25,7 +25,9 @@ You need:
   sign-in and approve session sharing yourself after installation.
 
 **OmniRoute is optional.** If you already have a working OmniRoute gateway, the
-installer can connect to it using protected auth and provider-ladder files. If
+installer can connect to it using a protected auth file. During installation
+you choose your own provider/account order and model mappings, or supply an
+existing protected configuration. See [provider configuration](docs/PROVIDERS.md). If
 you do not have one, choose **no** and use native Codex routing. This installer
 does not create an OmniRoute gateway or provider accounts.
 
@@ -38,7 +40,8 @@ Send the agent the repository link and this request:
 > profile, service ports, prerequisites, and disk space before changing anything.
 > Stop and tell me if migration of an existing profile or router is needed;
 > do not silently pick another profile. Run the interactive `onboard` installer
-> for a fresh profile. Ask me whether I already have OmniRoute, and let me enter
+> for a fresh profile. Ask me whether I already have OmniRoute and let me choose
+> my provider order and exact model IDs. Let me enter
 > the TypeSafe or OpenRouter key only in the local hidden prompt, never in chat.
 > Afterwards, tell me what passed, what remains untested, and which steps I
 > must complete in Codex before calling the installation working.
@@ -66,7 +69,8 @@ Set-Location jew-codex-harness
 ```
 
 The wizard asks for a fresh profile path, whether your Jev key is from TypeSafe
-or OpenRouter, and whether to use an existing OmniRoute gateway. It checks for
+or OpenRouter, and whether to use an existing OmniRoute gateway. For OmniRoute,
+it can build your protected provider sequence interactively. It checks for
 structural blockers before asking for the key. Keep the checkout at a stable
 path: installed services and hooks refer to it. See the [installation guide](docs/INSTALL.md)
 for non-interactive commands, protected files, and rollback.
@@ -93,8 +97,8 @@ separate checks in a client that exposes those capabilities.
 ## What is included
 
 - A Codex adapter and installer for fresh profiles on macOS, Linux, and Windows.
-- A local Jev router with native Codex routing and an optional OmniRoute
-  provider ladder. [Reasoning profiles](docs/REASONING.md) can map Jev's chosen
+- A local Jev router with native Codex routing and an optional user-configured
+  [OmniRoute provider order](docs/PROVIDERS.md). [Reasoning profiles](docs/REASONING.md) can map Jev's chosen
   effort to supported levels on each configured destination model.
 - An optional CanvasTTY browser broker on macOS when its helper is already
   installed. CanvasTTY and visible terminal workers are not installed by this kit.
@@ -113,6 +117,7 @@ or a completed live model response.
 - [Agent installation protocol](AGENT_INSTALL.md) and [adapter contract](docs/ADAPTER-CONTRACT.md)
 - [Installation details](docs/INSTALL.md), [CI scope](docs/CI.md), and [support matrix](docs/SUPPORT.md)
 - [Reasoning effort routing](docs/REASONING.md) and [source provenance](ROUTER_FORK.md)
+- [Provider/model routing audit](docs/AUDIT-2026-10-05.md)
 - [Security policy](SECURITY.md) and [contributing guide](CONTRIBUTING.md)
 
 The root project is [MIT licensed](LICENSE). The embedded router retains its

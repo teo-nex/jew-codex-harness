@@ -42,8 +42,10 @@ browser actions, context compaction or model routing in that client.
 On a fresh host/profile, run `doctor` before asking for credentials. For an
 interactive setup, use `./install.sh onboard` on macOS/Linux or
 `./install.ps1 onboard` on Windows. The wizard collects a TypeSafe or OpenRouter
-Jev key in a local hidden prompt and optionally asks for **existing** protected
-OmniRoute gateway and ladder files. It does not install OmniRoute or create
+Jev key in a local hidden prompt and optionally asks for an **existing** protected
+OmniRoute gateway-auth file. It can create a private provider configuration from
+the user's chosen order and model IDs, or reuse an existing protected file.
+It does not install OmniRoute or create
 provider accounts. For non-interactive work, use protected key **file paths**
 and the exact `doctor → prepare → install --dry-run → install → verify` sequence
 in `docs/INSTALL.md`. Read installed CLI `--help` before changing syntax.
@@ -54,7 +56,10 @@ dry-runs, installs and performs local checks plus one typed Jev decision. If
 preflight finds an existing profile/router conflict, stop and report
 `BLOCKED_MIGRATION`; do not select another profile or replace a service without
 the owner's direction. The key prompt is local and hidden. For OmniRoute, ask
-only for paths to an already-configured gateway and protected ladder/auth files.
+for the auth path to an already-configured gateway and let the user choose the
+provider/account order and exact model IDs, or supply an existing protected
+configuration. Do not hardcode the installer's author-specific provider order;
+follow `docs/PROVIDERS.md`. Never ask for gateway credentials in chat.
 
 The installer preserves the chosen default Codex model. Autorouting applies
 only when `jev/auto` is selected. A manually selected model keeps ordinary
