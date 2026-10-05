@@ -1,5 +1,7 @@
 # Jev Agent-First Install Kit
 
+[![CI](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml/badge.svg)](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml)
+
 This project lets a coding agent set up Jev routing for **Codex**. Jev can choose
 a model and reasoning depth for a task when you select `jev/auto`; you can still
 select a model yourself. The repository includes an installer, an embedded
@@ -112,6 +114,26 @@ runs offline installation checks with synthetic credentials on all three. CI
 does not prove a first installation with your credentials, hook trust, OAuth,
 or a completed live model response.
 
+## Managing an installed profile
+
+Run commands from the checkout with `python -m harness.cli --codex-home PROFILE`.
+Use `py -3` instead of `python` on Windows.
+
+| Control | Command or configuration |
+| --- | --- |
+| Provider/account order and models | `routes show`, `routes apply --config FILE`, `routes reorder ID ...` |
+| Safe edits and recovery | Config validation, durable backups, crash recovery, `routes rollback` |
+| Advertised model IDs | `catalog`, `routes check --catalog`; warnings for missing IDs and cross-family aliases |
+| Request diagnostics | `explain`: route, requested/effective effort, attempts and timings without prompt or credential export |
+| Project restrictions | Native-only, allowed providers, no paid fallback, required final Astra |
+| Failure handling | Connection/first-token/idle/total/attempt budgets and isolated account/model cooldowns |
+| Acceptance | `acceptance --offline-recovery`; live response/tool/effort checks require explicit `--live` |
+
+Project policies, request budgets and failure cooldowns are described in
+[Providers](docs/PROVIDERS.md). Opt-in fresh-client acceptance is documented in
+[Installation](docs/INSTALL.md); offline versus live evidence is recorded in
+[Improvements](docs/IMPROVEMENTS.md).
+
 ## More information
 
 - [Agent installation protocol](AGENT_INSTALL.md) and [adapter contract](docs/ADAPTER-CONTRACT.md)
@@ -123,15 +145,3 @@ or a completed live model response.
 The root project is [MIT licensed](LICENSE). The embedded router retains its
 own [MIT license](router/LICENSE) and [attribution](router/NOTICE.md). Keep
 API keys, OAuth files, provider state, and runtime logs out of Git.
-
-## Managing an installed profile
-
-Use `python -m harness.cli --codex-home PROFILE routes show` to inspect the
-provider sequence, `routes apply --config FILE` or `routes reorder ID ...` to
-change it without restarting, and `routes rollback` to restore the previous
-revision. `catalog` lists advertised gateway models; `explain` reports the latest
-route, effort mapping, retries and timing without exporting prompts or secrets.
-Project policies, request budgets and failure cooldowns are described in
-[Providers](docs/PROVIDERS.md). Opt-in fresh-client acceptance is documented in
-[Installation](docs/INSTALL.md); offline versus live evidence is recorded in
-[Improvements](docs/IMPROVEMENTS.md).
