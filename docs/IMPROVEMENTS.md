@@ -83,3 +83,17 @@ fresh Codex recovery with exactly two synthetic requests, `[503, 200]`, the
 expected marker and a matching thread scope. Process tests cover EOF on stdin,
 descendant cleanup after timeout, inherited output handles, nonzero exit codes
 and bounded capture. Hosted Windows acceptance still requires the new run.
+
+## Deadline attribution and repeated Windows checks
+
+An early socket timeout could be reported as `idle` even when the socket's
+wait was limited by the earlier total deadline. Failure classification now
+uses the binding deadline when there is no explicit timeout phase. A
+deterministic test reproduces a socket timeout just before monotonic reaches
+the total deadline; all 260 server tests passed locally (one platform skip).
+
+Fresh-client failure reports expose only a fixed stage, exception class and
+numeric OS error, never raw client stderr, prompts or credential material.
+Windows CI runs three independent recovery processes with new disposable
+profiles; failures are not retried or hidden. Its three-minute step ceiling
+remains in addition to each client's bounded timeout.

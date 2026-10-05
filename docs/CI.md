@@ -20,6 +20,9 @@ It also runs the full embedded-router test suite and starts a fresh real Codex
 CLI against two synthetic loopback routes: the first returns 503, the second
 must complete the exact marker with a matching fresh thread scope. File
 enumeration for the Node suite is portable to Windows without shell globbing.
+Windows runs three independent fresh-client checks, each with a new profile;
+the first failure stops the step instead of being retried. The step has a
+three-minute ceiling, and each client has a bounded subprocess timeout.
 The router lane does not install browser engines or provider credentials.
 
 ### Install smoke matrix (`install-smoke`)

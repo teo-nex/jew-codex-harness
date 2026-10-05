@@ -68,7 +68,11 @@ jobs:
         run: node --test ../tests/browser_broker.test.mjs
       - name: Fresh Codex client with controlled provider failure
         timeout-minutes: 3
-        run: python ../server/recovery_acceptance.py
+        run: >-
+          python -c "import os, subprocess, sys;
+          repeats = 3 if os.name == 'nt' else 1;
+          [subprocess.run([sys.executable, '../server/recovery_acceptance.py'], check=True)
+          for _ in range(repeats)]"
       - name: Full router regression suite
         run: >-
           python -c "from pathlib import Path; import subprocess;
