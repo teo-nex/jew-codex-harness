@@ -340,7 +340,7 @@ for (const { depth, ownerSignal } of [
   );
 }
 
-async function startBarrierOwningTree({ mode, rollbackMs, barrierMs, depth = 0 }) {
+async function startBarrierOwningTree({ mode, rollbackMs, barrierMs, depth = 0, registrationDelayMs = 0 }) {
   const directory = mkdtempSync(path.join(os.tmpdir(), "router-process-barrier-signal-"));
   const readyPath = path.join(directory, "ready.pid");
   const completedPath = path.join(directory, "rollback-complete");
@@ -371,6 +371,7 @@ async function startBarrierOwningTree({ mode, rollbackMs, barrierMs, depth = 0 }
     env: {
       ...process.env,
       CODEX_ROUTER_OWNER_SIGNAL_BUDGET_MS: "1500",
+      ROUTER_TEST_SPAWN_REGISTRATION_DELAY_MS: String(registrationDelayMs),
     },
   });
   // Bootstrap is outside the measured signal/rollback contract below. A
@@ -386,8 +387,8 @@ async function startBarrierOwningTree({ mode, rollbackMs, barrierMs, depth = 0 }
   };
 }
 
-test(
-  "multilevel owners preserve a descendant rollback barrier past every ordinary signal budget",
+for (const registrationDelayMs of [0, 600]) test(
+  `multilevel owners preserve a descendant rollback barrier past every ordinary signal budget (registration delay ${registrationDelayMs}ms)`,
   { skip: process.platform === "win32" },
   async () => {
     const tree = await startBarrierOwningTree({
@@ -395,6 +396,7 @@ test(
       rollbackMs: 1_300,
       barrierMs: 2_500,
       depth: 1,
+      registrationDelayMs,
     });
     const startedAt = Date.now();
     try {

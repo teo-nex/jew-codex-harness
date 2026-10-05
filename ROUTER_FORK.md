@@ -27,3 +27,10 @@ be copied back into the repository.
 Future upstream updates are deliberate source merges into `router/`, followed by
 the embedded router suite and the Jev end-to-end contract tests. The installed
 service never pulls or updates another repository by itself.
+
+## Maintained fixes
+
+- Owner-signal handlers are installed before spawning a process tree. This
+  prevents a descheduled intermediate owner from being terminated before it
+  can forward the signal and wait for a descendant's rollback barrier. The
+  regression fixture deliberately delays tree registration after spawn.

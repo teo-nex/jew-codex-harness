@@ -820,6 +820,10 @@ export function runProcessTree(
         })
       : { command, args };
     let child;
+    // A newly spawned descendant can run while this owner is descheduled.
+    // Install native signal handlers before spawn so an early owner signal
+    // is queued until the synchronous tree registration below completes.
+    ensureOwnerSignalHandlers();
     try {
       child = spawn(invocation.command, invocation.args, {
         cwd,
@@ -833,6 +837,7 @@ export function runProcessTree(
       });
     } catch (error) {
       coordinator.release();
+      maybeRemoveOwnerSignalHandlers();
       reject(error);
       return;
     }

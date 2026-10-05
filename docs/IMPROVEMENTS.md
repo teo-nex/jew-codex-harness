@@ -105,3 +105,18 @@ fixture servers now stop and wait for their request handlers before restoring
 patched globals or removing files. Tests enforce this teardown order and check
 that partial server startup closes sockets without waiting for an unstarted
 server. The follow-up hosted run must still pass all repeated Windows checks.
+
+## Process-owner startup race
+
+The [expanded hosted run](https://github.com/teo-nex/jew-codex-harness/actions/runs/37387416583)
+passed all Python, install-smoke and repeated fresh-client checks, and the full
+Linux router suite. Its macOS suite exposed a process-owner startup race:
+an intermediate owner could be descheduled immediately after spawning its
+child, before its native signal handlers were installed. An early signal then
+terminated that owner without forwarding cleanup to its detached descendant.
+
+A fixture now deliberately delays that registration by 600 ms. It reproduced
+the missing rollback marker against the old code and passed after handlers
+were moved before spawn. Both the delayed and ordinary regression preserve
+the original rollback and bounded-shutdown assertions. Cross-platform full
+suite results still require the follow-up published run.

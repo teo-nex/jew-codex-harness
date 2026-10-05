@@ -1,4 +1,6 @@
 import { writeFileSync } from "node:fs";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -28,6 +30,17 @@ if (
 ) throw new Error("A valid process-tree barrier fixture configuration is required.");
 
 if (depth > 0) {
+  const registrationDelayMs = Number(process.env.ROUTER_TEST_SPAWN_REGISTRATION_DELAY_MS ?? 0);
+  if (registrationDelayMs > 0) {
+    const originalSpawn = childProcess.spawn;
+    childProcess.spawn = (...args) => {
+      const child = originalSpawn(...args);
+      const deadline = Date.now() + registrationDelayMs;
+      while (Date.now() < deadline) { /* expose a descheduled owner after spawn */ }
+      return child;
+    };
+    syncBuiltinESMExports();
+  }
   await runProcessTree(process.execPath, [
     SELF,
     String(depth - 1),
