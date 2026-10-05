@@ -108,3 +108,18 @@ recognition by Jev is not deterministic proof that every final review was
 detected; explicit phase metadata is the deterministic trigger. Off/shadow
 flags cannot bypass configured project restrictions. These policies apply to
 `jev/auto`, not manually selected models in the parent client.
+# Request budgets
+
+Optional `request_budget` (version 2 and legacy) sets `connect_seconds` (15),
+`first_token_seconds` (60), `idle_seconds` (30), `total_seconds` (180), and
+`max_attempts` (8). Seconds are finite 0.05-900, attempts 1-1024. The adapter's
+defaults also apply without an external ladder. The monotonic total deadline
+includes classification time and all relay attempts; it never resets on retry.
+The existing Jev classifier has its own bounded 4-second call (capped by the
+remaining budget). Relay socket waits are interrupted even for an active stream.
+SSE lifecycle heartbeats do not count as a first token. For non-stream JSON,
+first bytes are the observable boundary; token timing remains unknown.
+
+Timeouts before visible output are retryable within the same remaining budget.
+After a visible native stream/tool event, the relay ends the stream and never
+replays that call. `explain` reports timeout phase and per-attempt timing.

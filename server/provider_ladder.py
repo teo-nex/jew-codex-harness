@@ -11,10 +11,12 @@ try:
     from .portable_lock import locked_file
     from .reasoning_effort import validate_reasoning_profiles
     from .project_policy import validate_project_fields
+    from .request_budget import validate_budget
 except ImportError:  # launched as a script from server/
     from portable_lock import locked_file
     from reasoning_effort import validate_reasoning_profiles
     from project_policy import validate_project_fields
+    from request_budget import validate_budget
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -22,7 +24,7 @@ NATIVE_MODELS = ("gpt-6-luna", "gpt-5.6-terra", "gpt-6-sol", "gpt-6-astra")
 
 
 def validate_ordered_config(value):
-    if set(value) - {"version", "providers", "reasoning_profiles", "project_policies", "project_scopes"}:
+    if set(value) - {"version", "providers", "reasoning_profiles", "project_policies", "project_scopes", "request_budget"}:
         raise ValueError("Ordered providers cannot be mixed with legacy ladder fields")
     if value.get("version", 2) != 2 or isinstance(value.get("version"), bool):
         raise ValueError("Ordered provider config version must be 2")
@@ -70,6 +72,7 @@ def validate_ordered_config(value):
     profiles = validate_reasoning_profiles(value.get("reasoning_profiles", {}))
     project_fields = validate_project_fields(value)
     return {"version": 2, "providers": result, "reasoning_profiles": profiles,
+            **({"request_budget": validate_budget(value["request_budget"])} if "request_budget" in value else {}),
             **(project_fields if "project_policies" in value or "project_scopes" in value else {})}
 
 
@@ -79,6 +82,8 @@ def validate_config(value):
     if "providers" in value:
         return validate_ordered_config(value)
     value = dict(value)
+    if "request_budget" in value:
+        value["request_budget"] = validate_budget(value["request_budget"])
     plus = value.get("plus_connection_id")
     gemini = value.get("gemini_connection_ids")
     if not isinstance(plus, str) or not plus:

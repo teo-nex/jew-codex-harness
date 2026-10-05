@@ -100,6 +100,7 @@ from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
+from request_budget import RequestBudget, AttemptClock, BudgetExceeded
 from reasoning_effort import resolve_model_reasoning_effort
 
 HOME = os.path.expanduser("~")
@@ -606,7 +607,7 @@ def call_jev(key, state, questions=None, timeout=4.0):
     if node and os.path.isfile(helper):
         result = subprocess.run([node, helper], input=json.dumps({
             "key": key, "body": body, "provider": provider, "timeout_ms": int(timeout * 1000),
-        }), text=True, capture_output=True, timeout=timeout + 2, check=False)
+        }), text=True, capture_output=True, timeout=timeout, check=False)
         if result.returncode != 0:
             raise RuntimeError((result.stderr or "Jev provider unavailable").strip()[:100])
         return json.loads(result.stdout)
@@ -2096,6 +2097,7 @@ class Handler(BaseHTTPRequestHandler):
         stripped = strip_signatures(payload)
 
         t0 = time.time()
+        request_started = time.monotonic()
         debug = os.path.exists(DEBUG_PATH)
         if debug:
             try:
@@ -2123,6 +2125,8 @@ class Handler(BaseHTTPRequestHandler):
             except (OSError, ValueError, RuntimeError):
                 return self._json(503, {"error": {"message": "provider policy unavailable"}})
         affinity = cache_affinity(scope, payload)
+        self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
+                                     if self._policy_ladder else None, started=request_started)
         leased = route_lease(scope, payload, step)
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
@@ -2143,7 +2147,7 @@ class Handler(BaseHTTPRequestHandler):
                 jt0 = time.time()
                 state = jev_state(task, prev_assistant, signals, step, affinity)
                 try:
-                    result = call_jev_routed(key, state)
+                    result = call_jev_routed(key, state, timeout=min(4.0, max(0.05, self._budget.remaining())))
                     decision = decision_from_answers(result.get("answers"))
                     raw_usage = result.get("usage") or {}
                     if not isinstance(raw_usage, dict):
@@ -2379,6 +2383,7 @@ class Handler(BaseHTTPRequestHandler):
                 effort = orig_effort
         injected_update = None
         self._attempts = []
+        self._budget = getattr(self, "_budget", None) or RequestBudget(ladder.config.get("request_budget"))
         last_error = None
         force_main_for_call = omniroute_cannot_represent_tool_search_history(payload)
         for attempt_index in range(ladder.attempt_limit + 1):
@@ -2487,6 +2492,8 @@ class Handler(BaseHTTPRequestHandler):
                           "cache_scope": scope, "stream": stream_requested})
                 return
             last_error = (status, ctype, unwritten)
+            if attempt.get("timeout_phase") in ("total", "max_attempts"):
+                break
             if forced_native or (native and ladder.providers is None):
                 break
         status, ctype, body = last_error or (503, "application/json", b'{"error":{"message":"provider ladder exhausted"}}')
@@ -2520,10 +2527,19 @@ class Handler(BaseHTTPRequestHandler):
         reopens, when it announced one.
         """
         attempt_started = time.monotonic()
+        budget = getattr(self, "_budget", None) or RequestBudget()
+        self._budget = budget
+        try:
+            budget.claim()
+        except BudgetExceeded as exc:
+            self._attempts.append({"model": model, "status": 504, "timeout_phase": exc.phase,
+                                   "completion": "budget_exhausted", "usage": None})
+            return 504, "json", "application/json", False, b'{"error":{"message":"request budget exhausted"}}', None
+        clock = AttemptClock(budget)
         body = json.dumps(payload).encode("utf-8")
         conn = http.client.HTTPConnection(
-            external["host"], external["port"], timeout=900
-        ) if external else http.client.HTTPConnection(*ROUTER, timeout=900)
+            external["host"], external["port"], timeout=clock.timeout()
+        ) if external else http.client.HTTPConnection(*ROUTER, timeout=clock.timeout())
         status = 0
         out_kind = ""
         ctype = ""
@@ -2535,6 +2551,36 @@ class Handler(BaseHTTPRequestHandler):
         self._attempts.append(attempt)
         markerer = None
         try:
+            connect = getattr(conn, "connect", None)
+            if callable(connect):
+                connect()
+                attempt["connect_ms"] = int((time.monotonic() - attempt_started) * 1000)
+            clock.connected(getattr(conn, "sock", None))
+            clock.before_read()
+
+            def read_body(limit=8 * 1024 * 1024 + 1):
+                observer = SummaryMarker("")
+                chunks, count = [], 0
+                while count < limit:
+                    clock.before_read()
+                    chunk = (resp.read1(min(65536, limit - count)) if hasattr(resp, "read1")
+                             else resp.read(limit - count))
+                    if not chunk:
+                        clock.timeout()
+                        break
+                    chunks.append(chunk)
+                    count += len(chunk)
+                    if is_sse:
+                        observer.feed(chunk)
+                        token = observer.first_token_at is not None
+                        if token:
+                            attempt.setdefault("first_token_ms", int((observer.first_token_at - attempt_started) * 1000))
+                    else:
+                        token = True  # JSON has no observable token boundary; limit first bytes.
+                    clock.progress(token=token)
+                    if not hasattr(resp, "read1") or getattr(resp, "isclosed", lambda: False)() is True:
+                        break
+                return b"".join(chunks)
             headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
             # The selected model must receive this exact canonical replay even
             # when the parent router's global aging/windowing knobs are enabled.
@@ -2585,7 +2631,7 @@ class Handler(BaseHTTPRequestHandler):
                 # content or tool call. Some upstreams append response.completed
                 # after an error event; forwarding that stream prevents safe
                 # provider fallback and LiteLLM rejects it mid-stream.
-                raw = resp.read(8 * 1024 * 1024 + 1)
+                raw = read_body()
                 if len(raw) <= 8 * 1024 * 1024:
                     from provider_output import normalize_sparse_output_indices
                     try:
@@ -2659,8 +2705,10 @@ class Handler(BaseHTTPRequestHandler):
 
                 try:
                     while True:
+                        clock.before_read()
                         chunk = resp.read1(65536) if hasattr(resp, "read1") else resp.read(65536)
                         if not chunk:
+                            clock.timeout()
                             break
                         if debug:
                             try:
@@ -2673,6 +2721,7 @@ class Handler(BaseHTTPRequestHandler):
                             except OSError:
                                 pass
                         piece = markerer.feed(chunk).encode("utf-8")
+                        clock.progress(token=markerer.first_token_at is not None)
                         if piece:
                             pending.extend(piece)
                         if markerer.exposed or markerer.terminal_type:
@@ -2680,8 +2729,12 @@ class Handler(BaseHTTPRequestHandler):
                             pending.clear()
                             if not connected:
                                 break
+                        if markerer.terminal_type:
+                            break
                 except (OSError, http.client.HTTPException) as exc:
                     transport_error = f"{type(exc).__name__}: upstream stream interrupted"
+                    if isinstance(exc, TimeoutError) or clock.expired:
+                        attempt["timeout_phase"] = clock.failure_phase(exc)
 
                 if not client_connected:
                     attempt["completion"] = "client_disconnected"
@@ -2697,7 +2750,7 @@ class Handler(BaseHTTPRequestHandler):
                 elif not markerer.exposed:
                     # No user-visible output or tool call crossed the relay, so
                     # the caller can safely retry this exact canonical request.
-                    status = 502
+                    status = 504 if attempt.get("timeout_phase") else 502
                     attempt["completion"] = "interrupted_precontent"
                     attempt["transport_error"] = transport_error or "upstream_eof"
                     data = b'{"error":{"message":"upstream stream ended before a terminal event"}}'
@@ -2722,7 +2775,7 @@ class Handler(BaseHTTPRequestHandler):
                     attempt["transport_error"] = "downstream_client_disconnected"
             else:
                 out_kind = "json"
-                data = resp.read()
+                data = read_body()
                 out_ctype = ctype or "application/json"
                 head = data[:64].lstrip()
                 if status >= 400:
@@ -2772,23 +2825,27 @@ class Handler(BaseHTTPRequestHandler):
                 self.end_headers()
                 self.wfile.write(data)
             return status, out_kind, ctype, False, None, None
-        except (OSError, http.client.HTTPException):
+        except (OSError, http.client.HTTPException) as exc:
+            if isinstance(exc, TimeoutError) or clock.expired:
+                attempt["timeout_phase"] = clock.failure_phase(exc)
             if self._response_started:
                 attempt["completion"] = "transport_failed"
                 attempt["transport_error"] = "upstream_transport_unavailable"
                 return status or 502, out_kind or "sse", ctype, False, None, None
-            status = 502
+            status = 504 if attempt.get("timeout_phase") else 502
             data = b'{"error":{"message":"upstream transport unavailable"}}'
             attempt["completion"] = "transport_unavailable"
             attempt["transport_error"] = "upstream_transport_unavailable"
             return status, "json", "application/json", False, data, None
         finally:
+            clock.close()
             attempt["status"] = status
             attempt["total_ms"] = int((time.monotonic() - attempt_started) * 1000)
             if markerer is not None:
                 attempt["response_model"] = markerer.response_model
-                attempt["first_token_ms"] = (int((markerer.first_token_at - attempt_started) * 1000)
-                                              if markerer.first_token_at is not None else None)
+                if "first_token_ms" not in attempt:
+                    attempt["first_token_ms"] = (int((markerer.first_token_at - attempt_started) * 1000)
+                                                  if markerer.first_token_at is not None else None)
                 attempt["usage"] = markerer.usage
                 attempt["terminal_type"] = markerer.terminal_type
                 attempt["transport_error"] = (

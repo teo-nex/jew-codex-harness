@@ -55,7 +55,7 @@ class GonkaOutputTests(unittest.TestCase):
             "duplicate_tool_action")
 
     def _forward(self, raw, ctype="text/event-stream"):
-        response = mock.Mock(status=200, headers={})
+        response = mock.Mock(spec=["status", "headers", "getheader", "read"], status=200, headers={})
         response.getheader.return_value = ctype
         response.read.return_value = raw
         connection = mock.Mock()
