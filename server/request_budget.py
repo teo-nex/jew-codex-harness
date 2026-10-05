@@ -115,4 +115,5 @@ class AttemptClock:
 
     def failure_phase(self, exc):
         return (getattr(exc, "phase", None) or
-                ("total" if not self.budget.remaining() else self.expired or self.phase))
+                ("total" if not self.budget.remaining() else self.expired or
+                 ("total" if self.budget.deadline <= self.phase_deadline else self.phase)))

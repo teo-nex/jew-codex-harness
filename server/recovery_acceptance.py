@@ -48,6 +48,7 @@ def run(executable=None):
     if not codex:
         return {"ok": False, "status": "blocked", "reason": "codex executable unavailable"}
     requests, records, servers, threads = [], [], [], []
+    stage = "setup"
     logged = threading.Event()
     def record(row):
         records.append(row)
@@ -110,7 +111,9 @@ def run(executable=None):
                        "-c", 'approval_policy="never"',
                        "-c", "features.multi_agent_v2=false", "-c", "agents.enabled=false", "-C", str(work),
                        "Synthetic connectivity check. No tools. Reply exactly " + MARKER]
+            stage = "client"
             completed = run_bounded(command, cwd=work, env=env, timeout=120)
+            stage = "evidence"
             logged.wait(2)
             terminal = False
             thread_id = None
@@ -136,6 +139,7 @@ def run(executable=None):
                   and requests == ["fixture/model-a", "fixture/model-b"]
                   and [a.get("http_status") for a in attempts] == [503, 200]
                   and attempts[-1].get("terminal_type") == "response.completed")
+            stage = "cleanup"
             return {"ok": ok, "status": "passed" if ok else "failed", "fresh_client": True,
                     "client_exit_code": completed.returncode,
                     "provider_requests": len(requests), "attempt_statuses": [a.get("http_status") for a in attempts],
@@ -145,8 +149,10 @@ def run(executable=None):
     except subprocess.TimeoutExpired:
         return {"ok": False, "status": "failed", "reason": "synthetic client timed out after 120 seconds",
                 "provider_requests": len(requests), "live_provider_proof": False}
-    except (OSError, ValueError, subprocess.SubprocessError):
-        return {"ok": False, "status": "failed", "reason": "synthetic fresh-client recovery failed"}
+    except (OSError, ValueError, subprocess.SubprocessError) as exc:
+        return {"ok": False, "status": "failed", "reason": "synthetic fresh-client recovery failed",
+                "stage": stage, "error_kind": type(exc).__name__,
+                "error_errno": getattr(exc, "errno", None), "provider_requests": len(requests)}
     finally:
         for index, server in enumerate(servers):
             if index < len(threads):

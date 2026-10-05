@@ -121,3 +121,19 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(second[0], 504)
         self.assertEqual(handler._attempts[1]["timeout_phase"], "max_attempts")
         conn.request.assert_not_called()
+
+    def test_socket_timeout_reports_the_limit_that_bounded_the_read(self):
+        with mock.patch("request_budget.time.monotonic", return_value=0) as now, \
+             mock.patch.object(AttemptClock, "_arm"):
+            clock = AttemptClock(RequestBudget({"total_seconds": 0.3, "idle_seconds": 2}))
+            sock = mock.Mock()
+            clock.connected(sock)
+            clock.progress(token=True)
+            clock.before_read()
+            self.assertAlmostEqual(sock.settimeout.call_args.args[0], 0.3)
+            # Windows socket timeouts can fire just before monotonic reaches
+            # the deadline. Attribute the error to the deadline actually set.
+            now.return_value = 0.299
+            self.assertEqual(clock.failure_phase(socket.timeout()), "total")
+            self.assertEqual(clock.failure_phase(BudgetExceeded("idle")), "idle")
+            clock.close()
