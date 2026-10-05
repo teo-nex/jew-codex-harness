@@ -10,7 +10,7 @@ from scripts import smoke_reasoning_live as smoke
 
 class AcceptanceTests(unittest.TestCase):
     def test_default_does_not_make_requests_or_start_client(self):
-        with mock.patch.object(acceptance.subprocess, "run") as process, \
+        with mock.patch.object(acceptance, "run_bounded") as process, \
              mock.patch.object(acceptance.live_verify, "verify_live") as live:
             report = acceptance.run(Path("."), Path("missing"))
         process.assert_not_called()
@@ -64,7 +64,7 @@ class AcceptanceTests(unittest.TestCase):
         request.assert_not_called()
 
     def test_recovery_runner_rejects_bad_report_and_does_not_echo_stderr(self):
-        with mock.patch.object(acceptance.subprocess, "run", return_value=mock.Mock(
+        with mock.patch.object(acceptance, "run_bounded", return_value=mock.Mock(
                 returncode=0, stdout='{"ok":false}', stderr="secret")):
             report = acceptance.recovery(Path("."))
         self.assertFalse(report["ok"])

@@ -13,6 +13,9 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from harness.process import run_bounded
+
 import jev_server as jev
 from provider_ladder import Ladder
 
@@ -97,16 +100,17 @@ def run(executable=None):
                        'env_key = "JEV_FIXTURE_TOKEN"\nrequires_openai_auth = false\n')
             (home / "config.toml").write_text(content)
             (home / "config.toml").chmod(0o600)
-            env = {key: value for key, value in os.environ.items() if key in
-                   ("PATH", "SystemRoot", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR")}
+            env = {key: value for key, value in os.environ.items() if key.upper() in
+                   ("PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "PATHEXT", "TMP", "TEMP", "TMPDIR")}
             env.update({"HOME": str(home), "CODEX_HOME": str(home), "JEV_FIXTURE_TOKEN": "fixture",
+                        "USERPROFILE": str(home), "APPDATA": str(home), "LOCALAPPDATA": str(home),
                         "CODEX_ROUTER_STATE_DIR": str(state), "MODEL_ROUTER_STATE_DIR": str(state)})
             command = [codex, "exec", "-m", "jev/auto", "--ephemeral", "--json", "--sandbox", "read-only",
                        "--skip-git-repo-check", "-c", "features.multi_agent=false",
+                       "-c", 'approval_policy="never"',
                        "-c", "features.multi_agent_v2=false", "-c", "agents.enabled=false", "-C", str(work),
                        "Synthetic connectivity check. No tools. Reply exactly " + MARKER]
-            completed = subprocess.run(command, cwd=work, env=env, capture_output=True, text=True,
-                                       timeout=120, check=False)
+            completed = run_bounded(command, cwd=work, env=env, timeout=120)
             logged.wait(2)
             terminal = False
             thread_id = None
@@ -133,10 +137,14 @@ def run(executable=None):
                   and [a.get("http_status") for a in attempts] == [503, 200]
                   and attempts[-1].get("terminal_type") == "response.completed")
             return {"ok": ok, "status": "passed" if ok else "failed", "fresh_client": True,
+                    "client_exit_code": completed.returncode,
                     "provider_requests": len(requests), "attempt_statuses": [a.get("http_status") for a in attempts],
                     "marker_accepted": terminal and "\n".join(texts).strip() == MARKER,
                     "fresh_client_scope_correlated": scope_correlated,
                     "live_provider_proof": False, "reasoning_enforcement": "unknown"}
+    except subprocess.TimeoutExpired:
+        return {"ok": False, "status": "failed", "reason": "synthetic client timed out after 120 seconds",
+                "provider_requests": len(requests), "live_provider_proof": False}
     except (OSError, ValueError, subprocess.SubprocessError):
         return {"ok": False, "status": "failed", "reason": "synthetic fresh-client recovery failed"}
     finally:

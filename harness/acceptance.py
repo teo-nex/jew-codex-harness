@@ -8,12 +8,12 @@ import subprocess
 import sys
 
 from . import core, live_verify, explain
+from .process import run_bounded
 
 
 def recovery(repo):
     try:
-        result = subprocess.run([sys.executable, str(repo / "server/recovery_acceptance.py")],
-                                capture_output=True, text=True, timeout=150, check=False)
+        result = run_bounded([sys.executable, str(repo / "server/recovery_acceptance.py")], timeout=150)
         report = json.loads(result.stdout)
         if not isinstance(report, dict) or report.get("ok") is not (result.returncode == 0):
             raise ValueError("invalid recovery report")

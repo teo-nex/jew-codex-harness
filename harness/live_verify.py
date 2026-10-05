@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from . import core
+from .process import run_bounded
 
 
 MARKER = "JEV_LIVE_VERIFY_OK"
@@ -160,8 +161,7 @@ def verify_manual(codex_home: Path, model: str, executable: str | None = None) -
                        "-C", cwd,
                        f"Create proof.txt containing exactly {MANUAL_MARKER} followed by one newline. "
                        "Use one local tool. Do not inspect other files, agents, or network resources."]
-            completed = subprocess.run(command, cwd=cwd, env=env, capture_output=True,
-                                       text=True, timeout=TIMEOUT_SECONDS, check=False)
+            completed = run_bounded(command, cwd=cwd, env=env, timeout=TIMEOUT_SECONDS)
             if completed.returncode:
                 return {"ok": False, "status": "failed", "reason": "manual Codex turn failed"}
             proof = Path(cwd) / "proof.txt"
@@ -231,14 +231,11 @@ def verify_live(codex_home: Path, executable: str | None = None) -> dict[str, An
                 PROMPT,
             ]
             try:
-                completed = subprocess.run(
+                completed = run_bounded(
                     command,
                     cwd=cwd,
                     env=env,
-                    capture_output=True,
-                    text=True,
                     timeout=TIMEOUT_SECONDS,
-                    check=False,
                 )
             except subprocess.TimeoutExpired:
                 return {"ok": False, "status": "failed", "reason": "live check timed out after 120 seconds"}

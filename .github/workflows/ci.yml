@@ -67,6 +67,7 @@ jobs:
       - name: Browser broker contract tests
         run: node --test ../tests/browser_broker.test.mjs
       - name: Fresh Codex client with controlled provider failure
+        timeout-minutes: 3
         run: python ../server/recovery_acceptance.py
       - name: Full router regression suite
         run: >-

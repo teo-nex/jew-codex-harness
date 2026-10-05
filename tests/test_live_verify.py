@@ -49,7 +49,7 @@ class LiveVerifyTests(unittest.TestCase):
                 return completed
 
             with mock.patch.object(live_verify.shutil, "which", return_value="/usr/bin/codex"), \
-                 mock.patch.object(live_verify.subprocess, "run", side_effect=run) as run_mock:
+                 mock.patch.object(live_verify, "run_bounded", side_effect=run) as run_mock:
                 result = live_verify.verify_live(Path(home))
             self.assertTrue(result["ok"], result)
             self.assertEqual(run_mock.call_count, 1)
@@ -63,7 +63,7 @@ class LiveVerifyTests(unittest.TestCase):
                 {"type": "turn.completed"},
             ]))
             with mock.patch.object(live_verify.shutil, "which", return_value="codex"), \
-                 mock.patch.object(live_verify.subprocess, "run", return_value=mock.Mock(returncode=0, stdout=events)):
+                 mock.patch.object(live_verify, "run_bounded", return_value=mock.Mock(returncode=0, stdout=events)):
                 result = live_verify.verify_live(Path(home))
         self.assertFalse(result["ok"])
         self.assertIn("hook did not load", result["reason"])
@@ -115,7 +115,7 @@ class LiveVerifyTests(unittest.TestCase):
                 return mock.Mock(returncode=0, stdout=events)
 
             with mock.patch.object(live_verify.shutil, "which", return_value="codex"), \
-                 mock.patch.object(live_verify.subprocess, "run", side_effect=run):
+                 mock.patch.object(live_verify, "run_bounded", side_effect=run):
                 result = live_verify.verify_manual(root, "gpt-6-luna")
             self.assertTrue(result["ok"], result)
 
@@ -144,7 +144,7 @@ class LiveVerifyTests(unittest.TestCase):
 
     def test_timeout_is_safe_and_clear(self):
         with mock.patch.object(live_verify.shutil, "which", return_value="codex"), \
-             mock.patch.object(live_verify.subprocess, "run", side_effect=live_verify.subprocess.TimeoutExpired("codex", 120)):
+             mock.patch.object(live_verify, "run_bounded", side_effect=live_verify.subprocess.TimeoutExpired("codex", 120)):
             result = live_verify.verify_live(Path("/tmp/profile"))
         self.assertFalse(result["ok"])
         self.assertIn("timed out", result["reason"])
