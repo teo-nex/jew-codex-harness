@@ -10,5 +10,5 @@ live provider or reasoning-enforcement proof. Existing services are untouched.
 | 3 | Latest request explained with sanitized routing, effort and timing evidence | verified: `tests/test_explain.py`, server response/signature regressions |
 | 4 | Project rules restrict transport/provider/payment and enforce final Astra | verified: `server/test_project_policy.py`; live project binding not run |
 | 5 | Connect, first token, idle, total and attempt limits stop hung requests safely | verified: loopback slow-stream tests; all 250 server tests (1 platform skip) |
-| 6 | Bad payload does not poison account; auth/quota/transient cooldowns isolate accounts | pending |
+| 6 | Bad payload does not poison account; auth/quota/transient cooldowns isolate accounts | verified: all 255 server tests (1 platform skip), including account/model recovery |
 | 7 | Opt-in fresh-client response/tool/effort checks and controlled recovery report evidence separately | pending |

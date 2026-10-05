@@ -221,7 +221,7 @@ class Ladder:
 
     def advance(self, scope, route, reason, reset_at=None, cooldown_seconds=900):
         """CAS: only the failed route may advance its own thread."""
-        if reason not in ("quota", "unavailable", "invalid_response"):
+        if reason not in ("quota", "unavailable", "invalid_response", "auth", "model_unavailable", "rate_limit", "timeout"):
             raise ValueError("unsupported fallback reason")
         if self.providers is not None:
             return self._ordered_advance(scope, route, reason, reset_at, cooldown_seconds)
@@ -308,6 +308,7 @@ class Ladder:
         return {"stage": provider["id"], "model": model,
                 "account": accounts[account_index] if accounts else None,
                 "effort": effort, "transport": provider["transport"],
+                "selected_tier": tier,
                 "provider_index": index, "account_index": account_index,
                 "config_hash": self.fingerprint}
 
@@ -317,6 +318,32 @@ class Ladder:
             return False
         count = len(self.providers[index].get("connection_ids", [])) if index < len(self.providers) else 0
         return account < max(1, count)
+
+    def _cooldown_key(self, route, reason=None):
+        # Account credentials/IDs never become visible state keys. Auth/quota
+        # isolate an account across models; model failures isolate a destination.
+        identity = ([route.get("transport"), route.get("stage"), route.get("model")]
+                    if reason == "model_unavailable" else
+                    [route.get("transport"), route.get("account")] if route.get("account") else
+                    [route.get("transport"), route.get("stage"), route.get("model"), None])
+        return hashlib.sha256(json.dumps(identity).encode()).hexdigest()
+
+    def _cooldowns(self, state):
+        circuits = state.setdefault("_route_cooldowns", {})
+        if not isinstance(circuits, dict):
+            raise ValueError("Invalid route cooldown inventory")
+        entries = circuits.setdefault(self.fingerprint, {})
+        if not isinstance(entries, dict):
+            raise ValueError("Invalid route cooldown state")
+        for key, row in entries.items():
+            if (not isinstance(row, dict) or type(row.get("until")) not in (int, float)
+                    or not math.isfinite(row["until"])):
+                raise ValueError("Invalid route cooldown deadline")
+        return entries
+
+    def _slot_until(self, entries, route):
+        return max((entries.get(self._cooldown_key(route, reason), {}).get("until", 0)
+                    for reason in (None, "model_unavailable")), default=0)
 
     def _ordered_route(self, scope, tier, effort, recover_primary):
         if tier not in NATIVE_MODELS or effort not in EFFORTS:
@@ -350,6 +377,25 @@ class Ladder:
             elif index == 0 and now < until:
                 index, account = thread.pop("resume_route", (1, 0))
                 thread["primary_retry_at"] = until
+            entries = self._cooldowns(state)
+            if index == len(self.providers) and recover_primary:
+                # Retry any recovered route after complete exhaustion, not only
+                # the first provider (which may have a much longer auth cooldown).
+                for candidate_index, provider in enumerate(self.providers):
+                    for candidate_account in range(max(1, len(provider.get("connection_ids", [])))):
+                        candidate = self._ordered_choice(candidate_index, candidate_account, tier, effort)
+                        if self._slot_until(entries, candidate) <= now:
+                            index, account = candidate_index, candidate_account
+                            break
+                    if index < len(self.providers):
+                        break
+            while index < len(self.providers):
+                candidate = self._ordered_choice(index, account, tier, effort)
+                if self._slot_until(entries, candidate) <= now:
+                    break
+                account += 1
+                if account >= max(1, len(self.providers[index].get("connection_ids", []))):
+                    index, account = index + 1, 0
             if (index, account) != (thread["provider_index"], thread["account_index"]):
                 thread["generation"] = thread.get("generation", 0) + 1
             thread.update(provider_index=index, account_index=account, seen_at=int(now))
@@ -373,12 +419,18 @@ class Ladder:
             accounts = self.providers[index].get("connection_ids", [])
             if route.get("account") != (accounts[account] if accounts else None):
                 return False, False
+            entries = self._cooldowns(state)
+            now = time.time()
+            until = (reset_at if type(reset_at) in (int, float) and math.isfinite(reset_at)
+                     and now + 1 <= reset_at <= now + 7 * 86400
+                     else now + max(1, min(int(cooldown_seconds), 3600)))
+            entries[self._cooldown_key(route, reason)] = {"until": until, "reason": reason}
             account += 1
             if account >= max(1, len(accounts)):
                 if index == 0:
-                    now = time.time()
-                    until = (reset_at if type(reset_at) in (int, float) and now + 30 <= reset_at <= now + 7 * 86400
-                             else now + max(30, min(int(cooldown_seconds), 3600)))
+                    until = min(self._slot_until(entries, self._ordered_choice(0, slot,
+                                       route["selected_tier"], route["effort"]))
+                                for slot in range(max(1, len(accounts))))
                     state["_ordered_primary_circuit"] = {"config_hash": self.fingerprint, "until": until}
                     thread["primary_retry_at"] = until
                     index, account = thread.pop("resume_route", (1, 0))
@@ -404,5 +456,8 @@ class Ladder:
             if route["provider_index"] == 0:
                 thread.pop("resume_route", None)
                 state.pop("_ordered_primary_circuit", None)
+            entries = self._cooldowns(state)
+            for reason in (None, "model_unavailable"):
+                entries.pop(self._cooldown_key(route, reason), None)
             return True, True
         return self._with_state(operation)

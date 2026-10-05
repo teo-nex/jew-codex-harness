@@ -101,6 +101,7 @@ from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from request_budget import RequestBudget, AttemptClock, BudgetExceeded
+from provider_failure import classify_failure
 from reasoning_effort import resolve_model_reasoning_effort
 
 HOME = os.path.expanduser("~")
@@ -2464,6 +2465,13 @@ class Handler(BaseHTTPRequestHandler):
                           "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                           "status": status, "cache_scope": scope, "stream": stream_requested})
                 return
+            failure = classify_failure(status, quota_hit, unwritten, attempt)
+            if (ladder.providers is None and status == 400 and not quota_hit
+                    and chosen["stage"] in ("glm", "deepseek")):
+                # Preserve the legacy request-shape handoff to Wally. Ordered
+                # routes use explicit bad-request classification instead.
+                failure = {"class": "unavailable", "cooldown_seconds": 30, "retryable": True}
+            attempt["failure_class"] = failure["class"]
             if (ladder.providers is None and status == 400 and not quota_hit
                     and chosen["stage"] in ("gemini", "opus", "wally")):
                 # This request shape failed before generation. Trying every
@@ -2472,12 +2480,9 @@ class Handler(BaseHTTPRequestHandler):
                 # instead advance through the requested DeepSeek/Wally order.
                 # Retry these account-scoped stages on the native model only.
                 force_main_for_call = True
-            elif not forced_native and (ladder.providers is not None or not native):
-                reason = "quota" if quota_hit else (
-                    "invalid_response" if status == 200 else "unavailable"
-                )
-                cooldown = (900 if status in (400, 401, 403)
-                            else 300 if quota_hit else 30)
+            elif not forced_native and failure["retryable"] and (ladder.providers is not None or not native):
+                reason = failure["class"]
+                cooldown = failure["cooldown_seconds"]
                 ladder.advance(scope, chosen, reason,
                                reset_at=_reset,
                                cooldown_seconds=cooldown)
@@ -2492,7 +2497,7 @@ class Handler(BaseHTTPRequestHandler):
                           "cache_scope": scope, "stream": stream_requested})
                 return
             last_error = (status, ctype, unwritten)
-            if attempt.get("timeout_phase") in ("total", "max_attempts"):
+            if not failure["retryable"] and not force_main_for_call:
                 break
             if forced_native or (native and ladder.providers is None):
                 break

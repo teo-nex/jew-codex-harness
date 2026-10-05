@@ -123,3 +123,21 @@ first bytes are the observable boundary; token timing remains unknown.
 Timeouts before visible output are retryable within the same remaining budget.
 After a visible native stream/tool event, the relay ends the stream and never
 replays that call. `explain` reports timeout phase and per-attempt timing.
+# Failure classes and recovery
+
+Ordered routes classify bad payload (400/413/422), auth (401/403), quota
+(402/429), explicit rate limit, missing model (404), timeout, unavailable
+transport and invalid output. A bad payload stops the call without advancing
+or cooling a healthy account. Client disconnect and total/attempt budget
+exhaustion also do not poison provider health. Invalid output is retried only
+before anything is visible, as with other relay failures.
+
+Auth cooldown defaults to 900 seconds, quota/model to 300, explicit rate limit
+and transient failure to 30. Advertised reset time is accepted only when finite,
+future and at most seven days away. Cooldowns persist per configuration and
+hashed account (or route/model when no account); a missing model blocks that
+destination across its accounts. New sessions skip unhealthy slots; another
+account and unrelated routes remain usable. Complete exhaustion can recover a
+secondary route before a longer primary auth cooldown. Legacy configs retain
+their historical sticky/shared-primary state and request-shape 400 handoffs; convert using `routes apply` for
+full per-account cooldowns. No upstream error body enters routing telemetry.
