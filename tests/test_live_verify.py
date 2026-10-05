@@ -89,6 +89,12 @@ class LiveVerifyTests(unittest.TestCase):
             request = build.return_value.open.call_args.args[0]
             self.assertEqual(request.full_url, "http://127.0.0.1:4319/ask")
             self.assertNotIn("fixture-local-key", str(result))
+            response.read.return_value = json.dumps({"model": "jev-1.13.0", "answers": {
+                "marker": {"type": "choice", "choice": "absent"}}}).encode()
+            with mock.patch.object(live_verify.core, "protected_file", return_value=key), \
+                 mock.patch.object(live_verify.urllib.request, "build_opener") as build:
+                build.return_value.open.return_value.__enter__.return_value = response
+                self.assertFalse(live_verify.verify_decision(root)["ok"])
 
     def test_manual_model_write_requires_matching_pretool_hook_receipt(self):
         with tempfile.TemporaryDirectory() as home:

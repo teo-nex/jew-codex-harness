@@ -15,6 +15,7 @@ from . import onboard
 from . import routes
 from . import catalog
 from . import explain
+from . import acceptance
 
 
 def parser() -> argparse.ArgumentParser:
@@ -32,6 +33,11 @@ def parser() -> argparse.ArgumentParser:
     sub.add_parser("catalog", help="read advertised models from the existing OmniRoute gateway")
     diagnostic = sub.add_parser("explain", help="sanitized latest request routing evidence")
     diagnostic.add_argument("--scope", help="optional logged cache-scope hash")
+    accept = sub.add_parser("acceptance", help="explicit fresh-client, effort, tool and recovery acceptance")
+    accept.add_argument("--live", action="store_true", help="spend bounded synthetic model requests")
+    accept.add_argument("--manual-model")
+    accept.add_argument("--gateway-model")
+    accept.add_argument("--offline-recovery", action="store_true", help="new Codex process with synthetic loopback failures")
     route = sub.add_parser("routes", help="inspect or hot-edit an owned provider sequence")
     actions = route.add_subparsers(dest="route_action", required=True)
     for action in ("show", "check", "apply", "reorder", "rollback", "bind"):
@@ -66,7 +72,13 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             args.typesafe_key_file = Path(os.environ[key_name])
     repo = repo or Path(__file__).resolve().parents[1]
     try:
-        if args.command == "explain":
+        if args.command == "acceptance":
+            result = acceptance.run(repo, args.codex_home, live=args.live, manual_model=args.manual_model,
+                                    gateway_model=args.gateway_model, auth=args.omniroute_auth_file,
+                                    offline_recovery=args.offline_recovery)
+            code = 0 if ((not args.live or result["live"].get("ok") is True) and
+                         (not args.offline_recovery or result["controlled_recovery"].get("ok") is True)) else 2
+        elif args.command == "explain":
             result = explain.latest(args.codex_home, args.scope)
             code = 0 if result["found"] else 2
         elif args.command == "catalog":

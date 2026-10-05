@@ -21,6 +21,8 @@ class ExplainTests(unittest.TestCase):
             self.assertEqual(report["reasoning_enforcement"], "unknown")
             self.assertNotIn("secret", json.dumps(report))
             self.assertFalse(explain.latest(root, "absent")["found"])
+            path.write_text('{"model":"fixture","attempts":null}\n')
+            self.assertEqual(explain.latest(root)["attempts"], [])
 
     def test_missing_log_does_not_create_profile(self):
         with tempfile.TemporaryDirectory() as root:

@@ -2189,6 +2189,7 @@ class Handler(BaseHTTPRequestHandler):
         # routes. Healthy native turns never enumerate providers.
         dry_reason = native_dry()
         native_model = model
+        native_effort = effort or (payload.get("reasoning") or {}).get("effort")
         fallback_plan = []
         no_fallback = False
         if dry_reason and model in TIERS:
@@ -2289,6 +2290,10 @@ class Handler(BaseHTTPRequestHandler):
 
         final_attempt = None
         observed_attempt = None
+        for attempt in self._attempts:
+            attempt["selected_model"] = native_model
+            attempt["requested_effort"] = native_effort
+            attempt["effective_effort"] = attempt.get("effort")
         for attempt in reversed(self._attempts):
             if attempt.get("model") != model:
                 continue
@@ -2328,6 +2333,9 @@ class Handler(BaseHTTPRequestHandler):
             "effort": effort,
             "speed": speed,
             "native": native_model,
+            "selected_model": native_model,
+            "requested_effort": native_effort,
+            "effective_effort": effort,
             "dry": dry_reason,
             "routing_scope": decision.get("lease") if decision else "call",
             "effort_transport": effort_transport,
@@ -2440,6 +2448,7 @@ class Handler(BaseHTTPRequestHandler):
             attempt["reasoning_status"] = resolved["status"]
             attempt["reasoning_source"] = resolved["source"]
             attempt["provider"] = chosen["stage"]
+            attempt["transport"] = "native" if native else "omniroute"
             completed = (status == 200 and attempt.get("terminal_type") == "response.completed"
                          and attempt.get("completion") != "client_disconnected"
                          and not attempt.get("transport_error"))

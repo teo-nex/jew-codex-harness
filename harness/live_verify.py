@@ -64,7 +64,7 @@ def verify_decision(codex_home: Path) -> dict[str, Any]:
             raise ValueError("invalid Jev decision envelope")
         answer = result.get("answers", {}).get("marker", {})
         valid = (result.get("model") == "jev-1.13.0" and answer.get("type") == "choice"
-                 and answer.get("choice") in ("present", "absent"))
+                 and answer.get("choice") == "present")
         return {"ok": valid, "status": "passed" if valid else "failed",
                 "reason": "typed Jev decision returned" if valid else "invalid typed Jev decision"}
     except (OSError, ValueError, KeyError, TypeError, core.InstallError):
@@ -248,6 +248,8 @@ def verify_live(codex_home: Path, executable: str | None = None) -> dict[str, An
             if ok and not _hook_loaded(completed.stdout, codex_home.expanduser().resolve()):
                 return {"ok": False, "status": "failed",
                         "reason": "Codex response completed but Jev prompt hook did not load"}
-            return {"ok": ok, "status": "passed" if ok else "failed", "reason": reason}
+            thread = _thread_id(completed.stdout)
+            return {"ok": ok, "status": "passed" if ok else "failed", "reason": reason,
+                    "cache_scope": hashlib.sha256(("prompt:" + thread).encode()).hexdigest()[:16] if thread else None}
     except OSError:
         return {"ok": False, "status": "failed", "reason": "could not start codex exec"}

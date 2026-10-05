@@ -29,6 +29,18 @@ def _recover(home):
         return
     core.protected_file(pending, "route transaction")
     txn = json.loads(pending.read_text())
+    if not isinstance(txn, dict):
+        raise core.InstallError("Invalid route transaction receipt")
+    for prefix in ("before", "after"):
+        saved = txn.get(prefix + "_journal")
+        content = txn.get(prefix + "_text")
+        digest = txn.get(prefix + "_hash")
+        if (not isinstance(content, str) or digest != _hash(content.encode())
+                or not isinstance(saved, dict) or saved.get("codex_home") != str(home)
+                or saved.get("phase") != "complete" or not isinstance(saved.get("owned"), dict)
+                or saved["owned"].get(RELATIVE) != digest):
+            raise core.InstallError("Invalid route transaction receipt")
+        validate_config(json.loads(content))
     journal = core._read_journal(home)
     current = core._digest(home / RELATIVE)
     if journal not in (txn["before_journal"], txn["after_journal"]):
@@ -89,7 +101,9 @@ def manage(home, action, config=None, order=None, scope=None, project=None):
             receipt = state / "routes-history" / (revision + ".json")
             core.protected_file(receipt, "route backup")
             previous = json.loads(receipt.read_text())
-            if previous["after_hash"] != _hash(original):
+            if (not isinstance(previous, dict) or previous.get("after_hash") != _hash(original)
+                    or not isinstance(previous.get("before_text"), str)
+                    or previous.get("before_hash") != _hash(previous["before_text"].encode())):
                 raise core.InstallError("Route backup does not match current config")
             data = previous["before_text"].encode()
             validate_config(json.loads(data))

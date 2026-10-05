@@ -104,7 +104,8 @@ The installer adds the global Jev Browser/Computer/Compact instructions to the p
 | CanvasTTY browser broker | optional | unavailable | unavailable |
 
 Full live acceptance on Linux and Windows remains pending. The portable worker refuses mutable tasks until file ownership can be enforced there. No key, auth JSON, quota snapshot, router state or log belongs in this Git repository.
-# Post-install route edits
+
+## Post-install route edits
 
 On a complete OmniRoute-enabled owned profile, use
 `python -m harness.cli --codex-home PROFILE routes show`, `routes check --config FILE`,
@@ -125,3 +126,25 @@ requested/effective reasoning, retry reasons and observed timings. Missing
 model or timing evidence remains unknown. No prompt, output, tool arguments,
 account credentials or raw log fields are exported. Provider-reported names
 do not establish backend identity; reasoning enforcement remains unknown.
+
+## Explicit acceptance suite
+
+`python -m harness.cli acceptance` reports checks as not run, without spending
+model requests. Add `--offline-recovery` to start a new real Codex process using
+a disposable private profile and two synthetic loopback providers. It must
+accept the exact marker after the first provider's 503 and the second's completed
+stream, with exactly two observed requests. This neither installs nor restarts
+services, uses live credentials, nor establishes a real provider's reliability.
+
+For separately authorized live checks, use
+`python -m harness.cli --codex-home PROFILE --omniroute-auth-file FILE acceptance --live --manual-model MODEL --gateway-model GATEWAY_ID`.
+It first verifies owned files/service, then a typed decision, a fresh `jev/auto`
+client response with matching route log, and a fresh manual-model tool fixture.
+It also sends low/high JSON and synthetic function-call loop probes through the
+existing gateway: at most six direct generation requests, no wrong-answer
+retries, provider changes, or service mutation. Each client process is bounded
+to 120 seconds; router retries remain subject to request budgets. The working
+directory is synthetic, not the repository. Review/trust installed hooks first.
+The report distinguishes requested effort, transmitted effective effort, API
+acceptance, completed tool/output checks, and unknown provider enforcement.
+This is connectivity/contract acceptance, not a model-quality benchmark.

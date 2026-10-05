@@ -2,6 +2,8 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+import threading
 from unittest.mock import Mock, patch
 
 from scripts import smoke_reasoning_live as smoke
@@ -13,6 +15,26 @@ def completed(output=None):
 
 
 class ReasoningSmokeTests(unittest.TestCase):
+    def test_short_content_length_response_is_accepted_without_closed_socket_read(self):
+        class Fixture(BaseHTTPRequestHandler):
+            def log_message(self, *args):
+                pass
+            def do_GET(self):
+                data = json.dumps(completed()).encode()
+                self.send_response(200)
+                self.send_header("Content-Length", str(len(data)))
+                self.end_headers()
+                self.wfile.write(data)
+        server = ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        try:
+            result = smoke.decode_response(smoke.request("fixture", server.server_port, "GET", "/", timeout=2))
+            self.assertEqual(result["status"], "completed")
+        finally:
+            server.shutdown()
+            server.server_close()
+            thread.join(2)
     def test_http_errors_do_not_echo_body_and_close_connection(self):
         connection = Mock()
         connection.getresponse.return_value.status = 401

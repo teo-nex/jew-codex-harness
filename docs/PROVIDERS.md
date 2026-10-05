@@ -75,7 +75,7 @@ for an installation-specific sequence and explicit model replacements.
 Attempts record `selected_model` separately from the destination `model`, plus
 the requested/effective reasoning levels. These are routing evidence, not proof
 of upstream model identity or provider-internal effort enforcement.
-# Catalog selection
+## Catalog selection
 
 Onboarding reads the existing gateway's `/v1/models` catalog and selects model
 numbers instead of inventing IDs. If the catalog is unavailable, exact-ID
@@ -84,7 +84,7 @@ entry remains available with an explicit unverified warning. Use
 models, or add `--catalog` to `routes check` to flag absent destinations and
 cross-family GPT aliases. Catalog advertising is not a successful generation
 probe, backend identity proof, or a reasoning-enforcement guarantee.
-# Project policies
+## Project policies
 
 Version 2 accepts `project_policies`, keyed by absolute project root, and
 `project_scopes`, mapping the 16-character `cache_scope` hash from `explain` to
@@ -108,7 +108,7 @@ recognition by Jev is not deterministic proof that every final review was
 detected; explicit phase metadata is the deterministic trigger. Off/shadow
 flags cannot bypass configured project restrictions. These policies apply to
 `jev/auto`, not manually selected models in the parent client.
-# Request budgets
+## Request budgets
 
 Optional `request_budget` (version 2 and legacy) sets `connect_seconds` (15),
 `first_token_seconds` (60), `idle_seconds` (30), `total_seconds` (180), and
@@ -123,7 +123,7 @@ first bytes are the observable boundary; token timing remains unknown.
 Timeouts before visible output are retryable within the same remaining budget.
 After a visible native stream/tool event, the relay ends the stream and never
 replays that call. `explain` reports timeout phase and per-attempt timing.
-# Failure classes and recovery
+## Failure classes and recovery
 
 Ordered routes classify bad payload (400/413/422), auth (401/403), quota
 (402/429), explicit rate limit, missing model (404), timeout, unavailable

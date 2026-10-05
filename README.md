@@ -123,3 +123,15 @@ or a completed live model response.
 The root project is [MIT licensed](LICENSE). The embedded router retains its
 own [MIT license](router/LICENSE) and [attribution](router/NOTICE.md). Keep
 API keys, OAuth files, provider state, and runtime logs out of Git.
+
+## Managing an installed profile
+
+Use `python -m harness.cli --codex-home PROFILE routes show` to inspect the
+provider sequence, `routes apply --config FILE` or `routes reorder ID ...` to
+change it without restarting, and `routes rollback` to restore the previous
+revision. `catalog` lists advertised gateway models; `explain` reports the latest
+route, effort mapping, retries and timing without exporting prompts or secrets.
+Project policies, request budgets and failure cooldowns are described in
+[Providers](docs/PROVIDERS.md). Opt-in fresh-client acceptance is documented in
+[Installation](docs/INSTALL.md); offline versus live evidence is recorded in
+[Improvements](docs/IMPROVEMENTS.md).

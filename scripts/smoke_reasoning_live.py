@@ -57,6 +57,8 @@ def request(key, port, method, path, payload=None, timeout=90):
             raw.extend(chunk)
             if len(raw) > LIMIT:
                 raise ValueError("response exceeds smoke size limit")
+            if response.isclosed() is True:
+                return bytes(raw)
     finally:
         conn.close()
 

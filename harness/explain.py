@@ -8,7 +8,7 @@ FIELDS = ("at", "cache_scope", "policy_version", "selected_model", "native", "ba
           "effort", "requested_effort", "effective_effort", "reasoning_status",
           "reasoning_source", "decision_source", "gate", "astra_policy", "step",
           "ladder_stage", "status", "jev_ms", "total_ms", "project_policy", "budget_exhausted")
-ATTEMPT_FIELDS = ("model", "response_model", "selected_model", "effort", "requested_effort",
+ATTEMPT_FIELDS = ("provider", "transport", "model", "response_model", "selected_model", "effort", "requested_effort",
                   "effective_effort", "reasoning_status", "reasoning_source", "status",
                   "http_status", "terminal_type", "completion", "failure_class", "fallback_reason",
                   "connect_ms", "headers_ms", "first_token_ms", "total_ms", "timeout_phase")
@@ -43,7 +43,8 @@ def latest(home, scope=None):
         if "model" not in row and "attempts" not in row:
             continue
         report = _safe(row, FIELDS)
-        report["attempts"] = [_safe(attempt, ATTEMPT_FIELDS) for attempt in row.get("attempts", [])
+        attempts = row.get("attempts")
+        report["attempts"] = [_safe(attempt, ATTEMPT_FIELDS) for attempt in (attempts if isinstance(attempts, list) else [])
                               if isinstance(attempt, dict)]
         report["found"] = True
         report["reasoning_enforcement"] = "unknown"

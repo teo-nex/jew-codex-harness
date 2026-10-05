@@ -101,6 +101,22 @@ class InstallCoreTests(unittest.TestCase):
         with self.assertRaisesRegex(core.InstallError, "changed"):
             routes.manage(self.home, "rollback")
 
+    def test_tampered_pending_receipt_never_writes_managed_state(self):
+        self._installed()
+        self.ladder.write_text(json.dumps({"providers": [{"id": "native", "transport": "native"}]}))
+        with mock.patch.object(core, "_journal", side_effect=OSError("synthetic crash")):
+            with self.assertRaises(OSError):
+                routes.manage(self.home, "apply", self.ladder)
+        target = self.home / "jev-harness/ladder-config.json"
+        before = target.read_bytes()
+        pending = self.home / "jev-harness/routes-pending.json"
+        receipt = json.loads(pending.read_text())
+        receipt["after_text"] = "{}"
+        pending.write_text(json.dumps(receipt))
+        with self.assertRaisesRegex(core.InstallError, "receipt"):
+            routes.manage(self.home, "show")
+        self.assertEqual(target.read_bytes(), before)
+
     def test_hot_route_rejects_bad_sequence_and_native_only_profile(self):
         self._installed()
         self.home = self.home.resolve()
