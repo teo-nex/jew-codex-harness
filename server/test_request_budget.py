@@ -8,7 +8,7 @@ import unittest
 from unittest import mock
 
 import jev_server as jev
-from request_budget import RequestBudget, BudgetExceeded, validate_budget
+from request_budget import RequestBudget, AttemptClock, BudgetExceeded, validate_budget
 
 
 class BudgetTests(unittest.TestCase):
@@ -33,12 +33,12 @@ class BudgetTests(unittest.TestCase):
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
                 try:
-                    for index in range(20):
+                    for index in range(100):
                         event = ({"type": "response.output_text.delta", "delta": "x"}
                                  if mode != "first_token" else {"type": "response.in_progress"})
                         self.wfile.write(("data: " + json.dumps(event) + "\n\n").encode())
                         self.wfile.flush()
-                        time.sleep(0.25 if mode == "idle" else 0.02)
+                        time.sleep(0.5 if mode == "idle" else 0.02)
                 except (OSError, BrokenPipeError):
                     pass
         server = ThreadingHTTPServer(("127.0.0.1", 0), SlowProvider)
@@ -52,8 +52,10 @@ class BudgetTests(unittest.TestCase):
         handler.send_response = lambda *_: None
         handler.send_header = lambda *_: None
         handler.end_headers = lambda: None
-        limits = {"first_token_seconds": 0.09, "idle_seconds": 0.09,
-                  "total_seconds": 0.13 if mode == "total" else 1}
+        # Keep non-target deadlines apart so runner scheduling cannot change
+        # which limit the fixture is meant to exercise.
+        limits = {"first_token_seconds": 2, "idle_seconds": 2, "total_seconds": 2}
+        limits[mode + "_seconds"] = 0.3 if mode == "total" else 0.2
         handler._budget = RequestBudget(limits)
         started = time.monotonic()
         try:
@@ -68,7 +70,7 @@ class BudgetTests(unittest.TestCase):
         self.assertIsNotNone(result[4])
         self.assertEqual(handler._attempts[-1]["timeout_phase"], mode)
         self.assertEqual(handler.wfile.getvalue(), b"")
-        self.assertLess(time.monotonic() - started, 1.5)
+        self.assertLess(time.monotonic() - started, 3)
 
     def test_first_token_not_reset_by_lifecycle_heartbeats(self):
         self._network_timeout("first_token")
@@ -78,6 +80,31 @@ class BudgetTests(unittest.TestCase):
 
     def test_total_deadline_stops_continuously_active_stream(self):
         self._network_timeout("total")
+
+    def test_progress_and_stale_timer_never_extend_total_deadline(self):
+        with mock.patch("request_budget.time.monotonic", return_value=0) as now, \
+             mock.patch.object(AttemptClock, "_arm"):
+            budget = RequestBudget({"total_seconds": 1, "idle_seconds": 0.5})
+            clock = AttemptClock(budget)
+            sock = mock.Mock()
+            clock.connected(sock)
+            now.return_value = 0.4
+            clock.progress(token=True)
+            now.return_value = 0.8
+            clock.progress(token=True)
+            clock.before_read()
+            self.assertAlmostEqual(sock.settimeout.call_args.args[0], 0.2)
+            self.assertEqual(budget.deadline, 1)
+            clock._interrupt()
+            sock.shutdown.assert_not_called()
+            now.return_value = 1
+            clock._interrupt()
+            self.assertEqual(clock.expired, "total")
+            sock.shutdown.assert_called_once_with(socket.SHUT_RDWR)
+            with self.assertRaises(BudgetExceeded) as caught:
+                clock.timeout()
+            self.assertEqual(caught.exception.phase, "total")
+            clock.close()
 
     def test_connect_timeout_and_exhausted_budget_do_not_send(self):
         handler = object.__new__(jev.Handler)

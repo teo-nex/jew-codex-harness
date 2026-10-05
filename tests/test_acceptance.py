@@ -35,6 +35,7 @@ class AcceptanceTests(unittest.TestCase):
             evidence = {"found": True, "status": 200, "attempts": [{"terminal_type": "response.completed"}]}
             probe = {"status": "PASS", "effective_effort": "low", "provider_control": "NOT_VERIFIED"}
             with mock.patch.object(core, "protected_file", return_value=auth), \
+                 mock.patch.object(smoke, "protected_file", return_value=auth), \
                  mock.patch.object(core, "verify", return_value={k: True for k in
                      ("files", "client_config", "model_preserved", "service_health")}), \
                  mock.patch.object(acceptance.live_verify, "verify_decision", return_value={"ok": True}), \
@@ -53,6 +54,14 @@ class AcceptanceTests(unittest.TestCase):
                 evidence["found"] = False
                 self.assertFalse(acceptance.run(profile, profile, live=True, manual_model="gpt-6-sol",
                                                gateway_model="fixture/model", auth=auth)["live"]["ok"])
+
+    def test_unprotected_auth_is_rejected_before_first_model_request(self):
+        with mock.patch.object(core, "protected_file", side_effect=core.InstallError("shared auth")), \
+             mock.patch.object(acceptance.live_verify, "verify_decision") as request:
+            with self.assertRaisesRegex(core.InstallError, "shared auth"):
+                acceptance.run(Path("."), Path("missing"), live=True,
+                               manual_model="gpt-6-sol", gateway_model="fixture/model", auth=Path("fixture"))
+        request.assert_not_called()
 
     def test_recovery_runner_rejects_bad_report_and_does_not_echo_stderr(self):
         with mock.patch.object(acceptance.subprocess, "run", return_value=mock.Mock(
