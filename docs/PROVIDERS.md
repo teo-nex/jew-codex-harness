@@ -75,3 +75,12 @@ for an installation-specific sequence and explicit model replacements.
 Attempts record `selected_model` separately from the destination `model`, plus
 the requested/effective reasoning levels. These are routing evidence, not proof
 of upstream model identity or provider-internal effort enforcement.
+# Catalog selection
+
+Onboarding reads the existing gateway's `/v1/models` catalog and selects model
+numbers instead of inventing IDs. If the catalog is unavailable, exact-ID
+entry remains available with an explicit unverified warning. Use
+`python -m harness.cli --omniroute-auth-file FILE catalog` to inspect advertised
+models, or add `--catalog` to `routes check` to flag absent destinations and
+cross-family GPT aliases. Catalog advertising is not a successful generation
+probe, backend identity proof, or a reasoning-enforcement guarantee.

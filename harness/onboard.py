@@ -13,10 +13,11 @@ import sys
 
 from . import core
 from . import live_verify
+from . import catalog
 from server.provider_ladder import NATIVE_MODELS, validate_config
 
 
-def _provider_sequence(read) -> dict:
+def _provider_sequence(read, models=None) -> dict:
     try:
         count = int(_answer(read, "Number of providers in fallback order (1-32)", "1"))
     except ValueError as exc:
@@ -31,11 +32,15 @@ def _provider_sequence(read) -> dict:
         mode = _answer(read, prefix + " model selection (fixed/jev)",
                        "jev" if transport == "native" else "fixed").lower()
         provider = {"id": identity, "transport": transport}
+        def destination(question, default=""):
+            if transport == "omniroute" and models is not None:
+                return catalog.choose(read, models, question)
+            return _answer(read, question, default)
         if mode == "fixed":
-            provider["model"] = _answer(read, prefix + " exact model ID", "")
+            provider["model"] = destination(prefix + " exact model ID")
         elif mode == "jev":
             provider["models"] = {
-                model: _answer(read, prefix + " destination for " + model,
+                model: destination(prefix + " destination for " + model,
                                model if transport == "native" else "")
                 for model in NATIVE_MODELS
             }
@@ -126,7 +131,14 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
         if ladder is None:
             sequence_mode = _answer(read, "Provider sequence (create/file)", "create").lower()
             if sequence_mode == "create":
-                generated_config = _provider_sequence(read)
+                try:
+                    available = catalog.fetch(omni)
+                except core.InstallError:
+                    available = None
+                    print("Catalog unavailable; enter exact model IDs (availability unverified).", file=sys.stderr)
+                generated_config = _provider_sequence(read, available)
+                for warning in catalog.warnings(generated_config, available or []):
+                    print(json.dumps(warning), file=sys.stderr)
             elif sequence_mode == "file":
                 ladder = Path(_answer(read, "Protected provider config path", ""))
             else:

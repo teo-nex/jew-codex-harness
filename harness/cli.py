@@ -13,6 +13,7 @@ from . import core
 from . import live_verify
 from . import onboard
 from . import routes
+from . import catalog
 
 
 def parser() -> argparse.ArgumentParser:
@@ -27,12 +28,15 @@ def parser() -> argparse.ArgumentParser:
                      type=Path)
     app.add_argument("--port", type=int, default=4319)
     sub = app.add_subparsers(dest="command", required=True)
+    sub.add_parser("catalog", help="read advertised models from the existing OmniRoute gateway")
     route = sub.add_parser("routes", help="inspect or hot-edit an owned provider sequence")
     actions = route.add_subparsers(dest="route_action", required=True)
     for action in ("show", "check", "apply", "reorder", "rollback"):
         child = actions.add_parser(action)
         if action in ("check", "apply"):
             child.add_argument("--config", type=Path, required=action == "apply")
+        if action == "check":
+            child.add_argument("--catalog", action="store_true")
         if action == "reorder":
             child.add_argument("order", nargs="+")
     for command in ("doctor", "prepare", "install", "resume", "verify", "rollback", "onboard"):
@@ -56,9 +60,14 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             args.typesafe_key_file = Path(os.environ[key_name])
     repo = repo or Path(__file__).resolve().parents[1]
     try:
-        if args.command == "routes":
+        if args.command == "catalog":
+            result = {"models": catalog.fetch(args.omniroute_auth_file), "availability": "advertised_not_probed"}
+            code = 0
+        elif args.command == "routes":
             result = routes.manage(args.codex_home, args.route_action,
                                    getattr(args, "config", None), getattr(args, "order", None))
+            if getattr(args, "catalog", False):
+                result["warnings"] = catalog.warnings(result["config"], catalog.fetch(args.omniroute_auth_file))
             code = 0
         elif args.command == "onboard":
             if not sys.stdin.isatty():
