@@ -57,7 +57,7 @@ def _owned(home):
     return journal
 
 
-def manage(home, action, config=None, order=None):
+def manage(home, action, config=None, order=None, scope=None, project=None):
     home = Path(home).expanduser().resolve()
     state = home / "jev-harness"
     if not state.is_dir() or state.is_symlink():
@@ -76,7 +76,13 @@ def manage(home, action, config=None, order=None):
         if action == "check":
             candidate = validate_config(json.loads(core.ladder_file(config).read_text())) if config else current
             return {"valid": True, "config": candidate}
-        if action == "rollback":
+        if action == "bind":
+            root = str(Path(project).expanduser().resolve())
+            if root not in current.get("project_policies", {}):
+                raise core.InstallError("Configure this project policy before binding a session")
+            current.setdefault("project_scopes", {})[scope] = root
+            data = _bytes(validate_config(current))
+        elif action == "rollback":
             revision = journal.get("route_revision")
             if not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{32}", revision):
                 raise core.InstallError("No previous route revision")

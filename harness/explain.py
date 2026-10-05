@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-FIELDS = ("at", "policy_version", "selected_model", "native", "base_tier", "model",
+FIELDS = ("at", "cache_scope", "policy_version", "selected_model", "native", "base_tier", "model",
           "effort", "requested_effort", "effective_effort", "reasoning_status",
           "reasoning_source", "decision_source", "gate", "astra_policy", "step",
           "ladder_stage", "status", "jev_ms", "total_ms", "project_policy", "budget_exhausted")

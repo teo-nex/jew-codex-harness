@@ -99,6 +99,7 @@ from local_runtime import (
 from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
+from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from reasoning_effort import resolve_model_reasoning_effort
 
 HOME = os.path.expanduser("~")
@@ -2113,9 +2114,20 @@ class Handler(BaseHTTPRequestHandler):
         jev_usage = None
         decision_source = None
         scope = cache_scope(payload, task)
+        self._project_policy = None
+        self._policy_ladder = None
+        if os.environ.get("JEV_LADDER_MODE") == "active":
+            try:
+                self._policy_ladder = _provider_ladder()
+                self._project_policy = resolve_project_policy(self._policy_ladder.config, scope)
+            except (OSError, ValueError, RuntimeError):
+                return self._json(503, {"error": {"message": "provider policy unavailable"}})
         affinity = cache_affinity(scope, payload)
         leased = route_lease(scope, payload, step)
-        if os.path.exists(OFF_PATH):
+        if self._project_policy and self._project_policy.get("native_only"):
+            model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
+            decision_source = "project_policy"
+        elif os.path.exists(OFF_PATH):
             model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "off"
         else:
             key = load_key()
@@ -2153,9 +2165,9 @@ class Handler(BaseHTTPRequestHandler):
                 decision_source = "technical_fallback"
 
         if (os.environ.get("JEV_LADDER_MODE") == "active"
-                and not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
+                and (self._project_policy or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
                 and isinstance(payload.get("prompt_cache_key"), str)
-                and payload["prompt_cache_key"].strip()):
+                and payload["prompt_cache_key"].strip()))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
                                       jev_usage, stream_requested, debug, t0, jev_ms,
                                       decision_source)
@@ -2346,8 +2358,15 @@ class Handler(BaseHTTPRequestHandler):
                       decision_source=None):
         """One canonical Codex replay, with quota-aware provider priority."""
         try:
-            ladder = _provider_ladder()
-            external_key = _omniroute_key()
+            ladder = getattr(self, "_policy_ladder", None) or _provider_ladder()
+            policy = resolve_project_policy(ladder.config, scope)
+            required = final_required(policy, payload, decision)
+            if required:
+                base_model = ASTRA
+            if policy:
+                ladder = Ladder(restrict_project_routes(ladder.config, policy, required), ladder.path)
+            external_key = _omniroute_key() if ladder.providers is None or any(
+                p["transport"] == "omniroute" for p in ladder.providers) else None
         except (OSError, ValueError, RuntimeError) as exc:
             return self._json(503, {"error": {"message": "provider ladder unavailable",
                                                "type": type(exc).__name__}})
@@ -2428,6 +2447,7 @@ class Handler(BaseHTTPRequestHandler):
                           "selected_model": base_model,
                           "astra_policy": decision.get("astra_policy") if decision else None,
                           "step": step.get("step_type"),
+                          "project_policy": policy.get("binding") if policy else None,
                           "effort": effective_effort,
                           "requested_effort": resolved["requested_effort"],
                           "effective_effort": resolved["effective_effort"],

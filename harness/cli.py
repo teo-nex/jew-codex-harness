@@ -34,7 +34,7 @@ def parser() -> argparse.ArgumentParser:
     diagnostic.add_argument("--scope", help="optional logged cache-scope hash")
     route = sub.add_parser("routes", help="inspect or hot-edit an owned provider sequence")
     actions = route.add_subparsers(dest="route_action", required=True)
-    for action in ("show", "check", "apply", "reorder", "rollback"):
+    for action in ("show", "check", "apply", "reorder", "rollback", "bind"):
         child = actions.add_parser(action)
         if action in ("check", "apply"):
             child.add_argument("--config", type=Path, required=action == "apply")
@@ -42,6 +42,9 @@ def parser() -> argparse.ArgumentParser:
             child.add_argument("--catalog", action="store_true")
         if action == "reorder":
             child.add_argument("order", nargs="+")
+        if action == "bind":
+            child.add_argument("--scope", required=True)
+            child.add_argument("--project", type=Path, required=True)
     for command in ("doctor", "prepare", "install", "resume", "verify", "rollback", "onboard"):
         child = sub.add_parser(command)
         if command == "install":
@@ -71,7 +74,8 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             code = 0
         elif args.command == "routes":
             result = routes.manage(args.codex_home, args.route_action,
-                                   getattr(args, "config", None), getattr(args, "order", None))
+                                   getattr(args, "config", None), getattr(args, "order", None),
+                                   getattr(args, "scope", None), getattr(args, "project", None))
             if getattr(args, "catalog", False):
                 result["warnings"] = catalog.warnings(result["config"], catalog.fetch(args.omniroute_auth_file))
             code = 0

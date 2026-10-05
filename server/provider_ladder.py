@@ -10,9 +10,11 @@ import time
 try:
     from .portable_lock import locked_file
     from .reasoning_effort import validate_reasoning_profiles
+    from .project_policy import validate_project_fields
 except ImportError:  # launched as a script from server/
     from portable_lock import locked_file
     from reasoning_effort import validate_reasoning_profiles
+    from project_policy import validate_project_fields
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
@@ -20,7 +22,7 @@ NATIVE_MODELS = ("gpt-6-luna", "gpt-5.6-terra", "gpt-6-sol", "gpt-6-astra")
 
 
 def validate_ordered_config(value):
-    if set(value) - {"version", "providers", "reasoning_profiles"}:
+    if set(value) - {"version", "providers", "reasoning_profiles", "project_policies", "project_scopes"}:
         raise ValueError("Ordered providers cannot be mixed with legacy ladder fields")
     if value.get("version", 2) != 2 or isinstance(value.get("version"), bool):
         raise ValueError("Ordered provider config version must be 2")
@@ -29,7 +31,7 @@ def validate_ordered_config(value):
         raise ValueError("providers must contain between 1 and 32 routes")
     result, ids = [], set()
     for provider in providers:
-        if not isinstance(provider, dict) or set(provider) - {"id", "transport", "model", "models", "connection_ids"}:
+        if not isinstance(provider, dict) or set(provider) - {"id", "transport", "model", "models", "connection_ids", "billing"}:
             raise ValueError("Invalid provider fields")
         identity = provider.get("id")
         if (not isinstance(identity, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", identity)
@@ -37,6 +39,8 @@ def validate_ordered_config(value):
             raise ValueError("Provider IDs must be unique lowercase identifiers")
         ids.add(identity)
         transport = provider.get("transport", "omniroute")
+        if "billing" in provider and provider["billing"] not in ("free", "subscription", "paid"):
+            raise ValueError("billing must be free, subscription or paid")
         if transport not in ("omniroute", "native"):
             raise ValueError("Provider transport must be omniroute or native")
         model, models = provider.get("model"), provider.get("models")
@@ -64,7 +68,9 @@ def validate_ordered_config(value):
             entry["connection_ids"] = list(accounts)
         result.append(entry)
     profiles = validate_reasoning_profiles(value.get("reasoning_profiles", {}))
-    return {"version": 2, "providers": result, "reasoning_profiles": profiles}
+    project_fields = validate_project_fields(value)
+    return {"version": 2, "providers": result, "reasoning_profiles": profiles,
+            **(project_fields if "project_policies" in value or "project_scopes" in value else {})}
 
 
 def validate_config(value):

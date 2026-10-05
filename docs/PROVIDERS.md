@@ -84,3 +84,27 @@ entry remains available with an explicit unverified warning. Use
 models, or add `--catalog` to `routes check` to flag absent destinations and
 cross-family GPT aliases. Catalog advertising is not a successful generation
 probe, backend identity proof, or a reasoning-enforcement guarantee.
+# Project policies
+
+Version 2 accepts `project_policies`, keyed by absolute project root, and
+`project_scopes`, mapping the 16-character `cache_scope` hash from `explain` to
+one of those roots. Edit the protected config using `routes apply`; bind a new
+session using `routes bind --scope HASH --project PATH`. Prompt text and
+request-supplied paths cannot authorize a different policy. With policies
+configured, an unbound session is native-only until explicitly bound.
+
+Policy switches: `native_only`, `no_paid_fallback`, `require_astra_final`, plus
+`allowed_providers` (external sequence IDs; native transport remains allowed).
+`native_only` also bypasses the external Jev classifier, choosing native Astra
+locally. Other policies restrict executing routes, not the configured Jev
+classifier. `no_paid_fallback` excludes external routes with `billing: "paid"`
+or unknown billing; `billing: "free"` and `"subscription"` are operator
+declarations, not billing verification. Actual native subscription limits remain.
+
+`require_astra_final` requires exact native `gpt-6-astra` when Jev classifies
+mandatory frontier work or the caller sets `metadata.jev_phase: "final_review"`.
+There is no cheaper fallback if that route is absent/unavailable. Semantic
+recognition by Jev is not deterministic proof that every final review was
+detected; explicit phase metadata is the deterministic trigger. Off/shadow
+flags cannot bypass configured project restrictions. These policies apply to
+`jev/auto`, not manually selected models in the parent client.
