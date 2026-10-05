@@ -14,6 +14,7 @@ from . import live_verify
 from . import onboard
 from . import routes
 from . import catalog
+from . import explain
 
 
 def parser() -> argparse.ArgumentParser:
@@ -29,6 +30,8 @@ def parser() -> argparse.ArgumentParser:
     app.add_argument("--port", type=int, default=4319)
     sub = app.add_subparsers(dest="command", required=True)
     sub.add_parser("catalog", help="read advertised models from the existing OmniRoute gateway")
+    diagnostic = sub.add_parser("explain", help="sanitized latest request routing evidence")
+    diagnostic.add_argument("--scope", help="optional logged cache-scope hash")
     route = sub.add_parser("routes", help="inspect or hot-edit an owned provider sequence")
     actions = route.add_subparsers(dest="route_action", required=True)
     for action in ("show", "check", "apply", "reorder", "rollback"):
@@ -60,7 +63,10 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             args.typesafe_key_file = Path(os.environ[key_name])
     repo = repo or Path(__file__).resolve().parents[1]
     try:
-        if args.command == "catalog":
+        if args.command == "explain":
+            result = explain.latest(args.codex_home, args.scope)
+            code = 0 if result["found"] else 2
+        elif args.command == "catalog":
             result = {"models": catalog.fetch(args.omniroute_auth_file), "availability": "advertised_not_probed"}
             code = 0
         elif args.command == "routes":

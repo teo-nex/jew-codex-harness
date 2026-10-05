@@ -7,6 +7,15 @@ import report_routing as report
 
 
 class Usage(unittest.TestCase):
+    def test_response_model_and_first_token_are_observed_not_guessed(self):
+        marker = j.SummaryMarker("")
+        self.assertIsNone(marker.response_model)
+        self.assertIsNone(marker.first_token_at)
+        marker.feed(('data: ' + json.dumps({"type": "response.created", "response": {"model": "reported"}}) + '\n\n').encode())
+        marker.feed(b'data: {"type":"response.output_text.delta","delta":"text"}\n\n')
+        self.assertEqual(marker.response_model, "reported")
+        self.assertIsNotNone(marker.first_token_at)
+
     def test_terra_attempt_uses_the_published_credit_rate(self):
         result = report.measured_usage([{"attempts": [{
             "model": j.TERRA, "speed": "default",

@@ -1472,6 +1472,8 @@ class SummaryMarker:
         self.usage = None
         self.terminal_type = None
         self.error_event = False
+        self.response_model = None
+        self.first_token_at = None
 
     @staticmethod
     def _emit(lines):
@@ -1613,6 +1615,12 @@ class SummaryMarker:
             out.append(self._emit(block))
             return out
         dtype = data.get("type")
+        response = data.get("response")
+        if isinstance(response, dict) and isinstance(response.get("model"), str):
+            self.response_model = response["model"]
+        if (self.first_token_at is None and isinstance(dtype, str)
+                and dtype.endswith(".delta") and data.get("delta")):
+            self.first_token_at = time.monotonic()
         if self.tool_search:
             if (dtype in ("response.function_call_arguments.delta", "response.function_call_arguments.done")
                     and ((data.get("item_id") is not None and data.get("item_id") in self._tool_search_items)
@@ -2406,6 +2414,7 @@ class Handler(BaseHTTPRequestHandler):
             attempt["effective_effort"] = resolved["effective_effort"]
             attempt["reasoning_status"] = resolved["status"]
             attempt["reasoning_source"] = resolved["source"]
+            attempt["provider"] = chosen["stage"]
             completed = (status == 200 and attempt.get("terminal_type") == "response.completed"
                          and attempt.get("completion") != "client_disconnected"
                          and not attempt.get("transport_error"))
@@ -2417,6 +2426,8 @@ class Handler(BaseHTTPRequestHandler):
                           "policy_version": POLICY_VERSION, "ladder_stage": chosen["stage"],
                           "ladder_account": (chosen["account"] or "")[:8], "model": model,
                           "selected_model": base_model,
+                          "astra_policy": decision.get("astra_policy") if decision else None,
+                          "step": step.get("step_type"),
                           "effort": effective_effort,
                           "requested_effort": resolved["requested_effort"],
                           "effective_effort": resolved["effective_effort"],
@@ -2445,6 +2456,7 @@ class Handler(BaseHTTPRequestHandler):
                 ladder.advance(scope, chosen, reason,
                                reset_at=_reset,
                                cooldown_seconds=cooldown)
+                attempt["fallback_reason"] = reason
             if unwritten is None:
                 # A partial stream may already be visible. Continue this thread
                 # on the next turn, never duplicate an action after exposure.
@@ -2487,6 +2499,7 @@ class Handler(BaseHTTPRequestHandler):
         client. ``resets_at`` is the instant that refusal said the window
         reopens, when it announced one.
         """
+        attempt_started = time.monotonic()
         body = json.dumps(payload).encode("utf-8")
         conn = http.client.HTTPConnection(
             external["host"], external["port"], timeout=900
@@ -2525,6 +2538,7 @@ class Handler(BaseHTTPRequestHandler):
                 headers=headers,
             )
             resp = conn.getresponse()
+            attempt["headers_ms"] = int((time.monotonic() - attempt_started) * 1000)
             status = resp.status
             attempt["http_status"] = status
             ctype = (resp.getheader("Content-Type") or "").strip()
@@ -2712,6 +2726,7 @@ class Handler(BaseHTTPRequestHandler):
                         attempt["completion"] = "interrupted_precontent"
                         attempt["transport_error"] = "upstream_eof"
                     if assembled is not None:
+                        attempt["response_model"] = assembled.get("model")
                         attempt["usage"] = usage_counts(assembled.get("usage"))
                         response_status = assembled.get("status")
                         if response_status in ("completed", "incomplete", "failed"):
@@ -2721,6 +2736,16 @@ class Handler(BaseHTTPRequestHandler):
                             headerer._sign_message_item(item)
                         data = json.dumps(assembled).encode("utf-8")
                         out_ctype = "application/json"
+                elif status == 200:
+                    try:
+                        assembled = json.loads(data)
+                    except (ValueError, UnicodeError):
+                        assembled = None
+                    if isinstance(assembled, dict):
+                        attempt["response_model"] = assembled.get("model")
+                        attempt["usage"] = usage_counts(assembled.get("usage"))
+                        if assembled.get("status") in ("completed", "incomplete", "failed"):
+                            attempt["terminal_type"] = "response." + assembled["status"]
                 self.send_response(status)
                 self.send_header("Content-Type", out_ctype)
                 self.send_header("Content-Length", str(len(data)))
@@ -2739,7 +2764,11 @@ class Handler(BaseHTTPRequestHandler):
             return status, "json", "application/json", False, data, None
         finally:
             attempt["status"] = status
+            attempt["total_ms"] = int((time.monotonic() - attempt_started) * 1000)
             if markerer is not None:
+                attempt["response_model"] = markerer.response_model
+                attempt["first_token_ms"] = (int((markerer.first_token_at - attempt_started) * 1000)
+                                              if markerer.first_token_at is not None else None)
                 attempt["usage"] = markerer.usage
                 attempt["terminal_type"] = markerer.terminal_type
                 attempt["transport_error"] = (

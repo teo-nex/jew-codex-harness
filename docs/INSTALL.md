@@ -115,3 +115,13 @@ updates the installation journal. An interrupted transaction is recovered on
 the next `routes` command. The running adapter reads the new config on its next
 request; no service restart or credential modification occurs. Native-only
 installations require a reviewed migration to enable an external gateway.
+
+## Request diagnostics
+
+`python -m harness.cli --codex-home PROFILE explain` reads bounded recent routing
+evidence. `--scope HASH` filters by the logged request scope. It distinguishes
+Jev selection, destination ID and provider-reported response model, includes
+requested/effective reasoning, retry reasons and observed timings. Missing
+model or timing evidence remains unknown. No prompt, output, tool arguments,
+account credentials or raw log fields are exported. Provider-reported names
+do not establish backend identity; reasoning enforcement remains unknown.
