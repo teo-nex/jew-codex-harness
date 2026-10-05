@@ -41,7 +41,7 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    timeout-minutes: 40
     defaults:
       run:
         working-directory: router
@@ -75,8 +75,9 @@ jobs:
           for _ in range(repeats)]"
       - name: Full router regression suite
         run: >-
-          python -c "from pathlib import Path; import subprocess;
-          subprocess.run(['node', '--test', '--test-concurrency=4', '--test-timeout=600000',
+          python -c "from pathlib import Path; import os, subprocess;
+          timeout_ms = 1200000 if os.name == 'nt' else 600000;
+          subprocess.run(['node', '--test', '--test-concurrency=4', f'--test-timeout={timeout_ms}',
           *map(str, sorted(Path('test').glob('*.test.mjs')))], check=True)"
 
   install-smoke:

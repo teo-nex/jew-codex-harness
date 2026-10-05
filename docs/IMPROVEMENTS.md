@@ -130,3 +130,12 @@ process group), waits for tree cleanup and stream closure, then removes only
 its fixture directory. A synthetic descendant regression failed against the
 old helper and passed after the fix. All four local app-server assertions,
 including both real signed-out Codex provider variants, passed.
+
+## Windows suite budget
+
+Windows profile-switch assertions passed up to the seven-case crash-boundary
+fixture, but the whole file reached its ten-minute Node ceiling. Individual
+ACL-backed fixtures took up to 47 seconds. CI now permits twenty minutes per
+Windows test file and forty minutes for the router job, without changing any
+operation deadline, assertion or fresh-client limit. This is a bounded runner
+budget adjustment, not proof that the previously interrupted test passed.
