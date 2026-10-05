@@ -120,3 +120,13 @@ the missing rollback marker against the old code and passed after handlers
 were moved before spawn. Both the delayed and ordinary regression preserve
 the original rollback and bounded-shutdown assertions. Cross-platform full
 suite results still require the follow-up published run.
+
+## App-server test containment
+
+The Windows router suite also found a locked disposable app-server profile.
+The test waited for its launcher to exit but did not retire descendants. It
+now uses the existing kill-on-close Windows Job Object (or its own POSIX
+process group), waits for tree cleanup and stream closure, then removes only
+its fixture directory. A synthetic descendant regression failed against the
+old helper and passed after the fix. All four local app-server assertions,
+including both real signed-out Codex provider variants, passed.

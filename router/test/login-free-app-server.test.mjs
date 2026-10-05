@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import { codexCandidatePaths, findCodexBinary } from "../src/codex-binary.mjs";
 import { handleResponsesWebSocketUpgrade } from "../src/responses-websocket.mjs";
+import { terminateProcessTree, windowsJobProcessInvocation } from "../src/process-tree.mjs";
 import { spawnableCommand } from "../src/spawnable-command.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -158,17 +159,23 @@ function responseStream(model) {
   ].join("\n");
 }
 
-function runAppServerTurn(binary, env, model, modelProvider) {
+function runAppServerTurn(binary, env, model, modelProvider, { target = spawnableCommand(binary, ["app-server"]) } = {}) {
   return new Promise((resolve, reject) => {
-    const target = spawnableCommand(binary, ["app-server"]);
+    const invocation = process.platform === "win32"
+      ? windowsJobProcessInvocation(target.command, target.args, {
+        environment: env,
+        windowsVerbatimArguments: target.options?.windowsVerbatimArguments,
+      })
+      : target;
     // CodeQL conflates spawnableCommand's direct-exec and escaped Windows-batch
     // return shapes across unrelated callers. The helper rejects illegal batch
     // paths and escapes every cmd.exe metacharacter before this test spawn.
     // codeql[js/shell-command-injection-from-environment]
-    const child = spawn(target.command, target.args, {
-      ...target.options,
+    const child = spawn(invocation.command, invocation.args, {
+      ...(process.platform === "win32" ? {} : target.options),
       cwd: root,
       env,
+      detached: process.platform !== "win32",
       stdio: ["pipe", "pipe", "pipe"],
       windowsHide: true,
     });
@@ -176,25 +183,38 @@ function runAppServerTurn(binary, env, model, modelProvider) {
     let stderr = "";
     let settled = false;
     const notifications = [];
+    let closed = false;
+    const childClose = new Promise((resolveClose) => child.once("close", () => {
+      closed = true;
+      resolveClose();
+    }));
 
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       lines.close();
-      const complete = () => {
-        child.stdin.destroy();
-        child.stdout.destroy();
-        child.stderr.destroy();
-        if (error) reject(error);
-        else resolve(value);
-      };
-      if (child.exitCode !== null || child.signalCode !== null) {
-        complete();
-        return;
-      }
-      child.once("exit", complete);
-      child.kill();
+      void (async () => {
+        let closeTimer;
+        try {
+          await terminateProcessTree(child, { environment: env });
+          if (!closed) await Promise.race([
+            childClose,
+            new Promise((_, rejectClose) => {
+              closeTimer = setTimeout(() => rejectClose(new Error("App-server streams did not close after tree cleanup.")), 5_000);
+            }),
+          ]);
+          if (error) reject(error);
+          else resolve(value);
+        } catch (cleanupError) {
+          reject(cleanupError);
+        } finally {
+          clearTimeout(closeTimer);
+          child.stdin.destroy();
+          child.stdout.destroy();
+          child.stderr.destroy();
+        }
+      })();
     };
     const send = (message) => child.stdin.write(`${JSON.stringify(message)}\n`);
     const timer = setTimeout(
@@ -205,6 +225,7 @@ function runAppServerTurn(binary, env, model, modelProvider) {
     child.stderr.setEncoding("utf8");
     child.stderr.on("data", (chunk) => { stderr += chunk; });
     child.once("error", (error) => finish(error));
+    child.stdin.on("error", (error) => finish(error));
     child.once("exit", (code) => {
       if (!settled) finish(new Error(`Codex app-server exited ${code}. ${stderr}`));
     });
@@ -264,6 +285,53 @@ function runAppServerTurn(binary, env, model, modelProvider) {
     });
   });
 }
+
+test("app-server completion retires descendants before returning", async () => {
+  const directory = mkdtempSync(path.join(os.tmpdir(), "router-app-server-descendant-"));
+  const pidPath = path.join(directory, "descendant.pid");
+  const markerPath = path.join(directory, "late-write");
+  const descendant = `
+    const fs = require('node:fs');
+    fs.writeFileSync(${JSON.stringify(pidPath)}, String(process.pid));
+    setTimeout(() => fs.writeFileSync(${JSON.stringify(markerPath)}, 'orphan'), 1000);
+  `;
+  const fixture = `
+    const fs = require('node:fs');
+    const readline = require('node:readline');
+    const { spawn } = require('node:child_process');
+    readline.createInterface({ input: process.stdin }).on('line', (line) => {
+      const message = JSON.parse(line);
+      const send = (value) => process.stdout.write(JSON.stringify(value) + '\\n');
+      if (message.id === 1) send({ id: 1, result: {} });
+      if (message.id === 2) send({ id: 2, result: { thread: { id: 'fixture' } } });
+      if (message.id === 3) {
+        spawn(process.execPath, ['-e', ${JSON.stringify(descendant)}], { stdio: 'ignore' });
+        const ready = setInterval(() => {
+          if (!fs.existsSync(${JSON.stringify(pidPath)})) return;
+          clearInterval(ready);
+          send({ method: 'turn/completed', params: {} });
+        }, 10);
+      }
+    });
+  `;
+  let descendantPid;
+  try {
+    await runAppServerTurn(undefined, process.env, "fixture", "fixture", {
+      target: { command: process.execPath, args: ["-e", fixture] },
+    });
+    descendantPid = Number(readFileSync(pidPath, "utf8"));
+    assert.ok(Number.isSafeInteger(descendantPid) && descendantPid > 0);
+    assert.throws(() => process.kill(descendantPid, 0), { code: "ESRCH" });
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    assert.equal(existsSync(markerPath), false);
+  } finally {
+    descendantPid ??= existsSync(pidPath) ? Number(readFileSync(pidPath, "utf8")) : undefined;
+    if (descendantPid) {
+      try { process.kill(descendantPid, "SIGKILL"); } catch { /* already gone */ }
+    }
+    rmSync(directory, { recursive: true, force: true, maxRetries: 20, retryDelay: 50 });
+  }
+});
 
 async function verifySignedOutTurn(binary, { initialProvider = "openai" } = {}) {
   const codexHome = mkdtempSync(path.join(os.tmpdir(), "codex-router-login-free-app-server-"));
