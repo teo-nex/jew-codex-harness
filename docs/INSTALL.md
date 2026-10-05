@@ -104,3 +104,14 @@ The installer adds the global Jev Browser/Computer/Compact instructions to the p
 | CanvasTTY browser broker | optional | unavailable | unavailable |
 
 Full live acceptance on Linux and Windows remains pending. The portable worker refuses mutable tasks until file ownership can be enforced there. No key, auth JSON, quota snapshot, router state or log belongs in this Git repository.
+# Post-install route edits
+
+On a complete OmniRoute-enabled owned profile, use
+`python -m harness.cli --codex-home PROFILE routes show`, `routes check --config FILE`,
+`routes apply --config FILE`, `routes reorder ID ID ...`, or `routes rollback`.
+The protected JSON file uses the same schema as onboarding. Accounts and model
+maps can be changed through `apply`. Every edit creates a private backup and
+updates the installation journal. An interrupted transaction is recovered on
+the next `routes` command. The running adapter reads the new config on its next
+request; no service restart or credential modification occurs. Native-only
+installations require a reviewed migration to enable an external gateway.

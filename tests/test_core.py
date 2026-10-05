@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest import mock
 
 from harness import core
+from harness import routes
 from harness.agent_config import merge_agents
 
 
@@ -70,6 +71,48 @@ class InstallCoreTests(unittest.TestCase):
             "thread", "gpt-6-astra", "xhigh")
         self.assertEqual((route["stage"], route["model"], route["account"]),
                          ("preferred", "vendor/chosen", "b"))
+
+    def test_hot_route_edits_rollback_and_install_ownership(self):
+        self.ladder.write_text(json.dumps({"providers": [
+            {"id": "a", "model": "vendor/first", "connection_ids": ["1", "2"]},
+            {"id": "native", "transport": "native"}]}))
+        self._installed()
+        before = routes.manage(self.home, "show")
+        with mock.patch.object(core.subprocess, "run") as process:
+            edited = routes.manage(self.home, "reorder", order=["native", "a"])
+            process.assert_not_called()
+        self.assertTrue(edited["changed"])
+        self.assertEqual(routes.manage(self.home, "show")["config"]["providers"][0]["id"], "native")
+        self.assertTrue(Path(edited["backup"]).is_file())
+        self.assertTrue(routes.manage(self.home, "rollback")["changed"])
+        self.assertEqual(routes.manage(self.home, "show")["sha256"], before["sha256"])
+
+    def test_hot_route_apply_crash_recovers_and_refuses_foreign_edits(self):
+        self._installed()
+        candidate = {"providers": [{"id": "native", "transport": "native"}]}
+        self.ladder.write_text(json.dumps(candidate))
+        with mock.patch.object(core, "_journal", side_effect=OSError("synthetic crash")):
+            with self.assertRaises(OSError):
+                routes.manage(self.home, "apply", self.ladder)
+        self.assertTrue((self.home / "jev-harness/routes-pending.json").exists())
+        self.assertEqual(routes.manage(self.home, "show")["config"]["providers"][0]["id"], "native")
+        self.assertFalse((self.home / "jev-harness/routes-pending.json").exists())
+        (self.home / "jev-harness/ladder-config.json").write_text("{}")
+        with self.assertRaisesRegex(core.InstallError, "changed"):
+            routes.manage(self.home, "rollback")
+
+    def test_hot_route_rejects_bad_sequence_and_native_only_profile(self):
+        self._installed()
+        self.home = self.home.resolve()
+        with self.assertRaises(core.InstallError):
+            routes.manage(self.home, "reorder", order=["missing"])
+        journal = core._read_journal(self.home)
+        (self.home / "jev-harness/ladder-config.json").unlink()
+        old = journal.copy()
+        journal = {**journal, "owned": {k: v for k, v in journal["owned"].items() if k != routes.RELATIVE}}
+        core._journal(self.home / "jev-harness", journal, old)
+        with self.assertRaisesRegex(core.InstallError, "migration"):
+            routes.manage(self.home, "show")
 
     def test_prepare_overrides_inherited_router_identity(self):
         inherited = {"MODEL_ROUTER_STATE_DIR": str(self.root / "foreign-state"),

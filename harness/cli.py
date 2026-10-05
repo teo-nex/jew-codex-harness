@@ -12,6 +12,7 @@ from pathlib import Path
 from . import core
 from . import live_verify
 from . import onboard
+from . import routes
 
 
 def parser() -> argparse.ArgumentParser:
@@ -26,6 +27,14 @@ def parser() -> argparse.ArgumentParser:
                      type=Path)
     app.add_argument("--port", type=int, default=4319)
     sub = app.add_subparsers(dest="command", required=True)
+    route = sub.add_parser("routes", help="inspect or hot-edit an owned provider sequence")
+    actions = route.add_subparsers(dest="route_action", required=True)
+    for action in ("show", "check", "apply", "reorder", "rollback"):
+        child = actions.add_parser(action)
+        if action in ("check", "apply"):
+            child.add_argument("--config", type=Path, required=action == "apply")
+        if action == "reorder":
+            child.add_argument("order", nargs="+")
     for command in ("doctor", "prepare", "install", "resume", "verify", "rollback", "onboard"):
         child = sub.add_parser(command)
         if command == "install":
@@ -47,7 +56,11 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             args.typesafe_key_file = Path(os.environ[key_name])
     repo = repo or Path(__file__).resolve().parents[1]
     try:
-        if args.command == "onboard":
+        if args.command == "routes":
+            result = routes.manage(args.codex_home, args.route_action,
+                                   getattr(args, "config", None), getattr(args, "order", None))
+            code = 0
+        elif args.command == "onboard":
             if not sys.stdin.isatty():
                 raise core.InstallError("onboard needs an interactive terminal; use install with a protected --jev-key-file for automation")
             result = onboard.run(repo, args.codex_home, args.port,
