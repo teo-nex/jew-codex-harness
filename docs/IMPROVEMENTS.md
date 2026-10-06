@@ -6,20 +6,29 @@ live provider or reasoning-enforcement proof. Existing services are untouched.
 ## Published runtime verification
 
 Checked on 2026-10-06 against
-[`7502e9e`](https://github.com/teo-nex/jew-codex-harness/commit/7502e9e637d170809d56560d42ddf7f67d423add).
-The [published-source workflow](https://github.com/teo-nex/jew-codex-harness/actions/runs/37389372834)
-is the authoritative hosted record; earlier failures and corrections remain
-documented below.
+[`2b545e0`](https://github.com/teo-nex/jew-codex-harness/commit/2b545e0ca50aab953d934e2f7895b89a6ba4604e).
+All fourteen jobs in the
+[published-source workflow](https://github.com/teo-nex/jew-codex-harness/actions/runs/37391696911)
+completed successfully. This is the authoritative hosted record; earlier
+failures and corrections remain documented below. A later documentation-only
+commit records these results without changing the tested runtime or workflow.
 
 | Check | Result |
 | --- | --- |
 | Python 3.11 and 3.13 on Linux, macOS and Windows | All six jobs passed; 180 harness and 262 server tests per configuration, with platform skips reported by the runner |
 | Full embedded router on Linux | 4,416 passed, 33 platform skips, zero failures |
 | Full embedded router on macOS | 4,417 passed, 32 platform skips, zero failures |
-| Full embedded router on Windows | 4,320 passed, 121 platform skips, zero assertion failures; one profile-switch file cancelled at its 20-minute ceiling; full Windows acceptance pending |
+| Embedded router on Windows, main job | 4,282 passed, 121 platform skips, zero failures or cancellations; 335 files |
+| Complete Windows profile-switch recovery, dedicated job | 40 passed, zero skips, failures or cancellations; the remaining file |
 | Real fresh Codex with synthetic provider failure | Passed on all three OSes; Windows additionally passed three independent new-profile runs |
 | Disposable install, health, verify and Jev rollback | Passed on all three OSes; the Windows base router remains until hosted-VM disposal |
 | Repository hygiene and source archive | Passed; changed runtime files in the archive match the published Git source byte for byte |
+
+Windows covers all 336 router test files across its two jobs: 4,322 passing
+tests and 121 platform skips. Its total is six lower than Linux and macOS
+because three platform-skipped parent tests in `service-render.test.mjs` do
+not register their two nested cases on Windows. The dedicated profile-switch
+file contains forty tests; none were removed, selectively filtered or retried.
 
 Both new process regressions failed against their original implementations:
 delayed owner registration lost descendant rollback, and app-server completion
@@ -181,3 +190,11 @@ profile-switch file in its own Windows job with a thirty-minute ceiling,
 without competing full-suite workers. The remaining router files keep their
 original ten-minute ceiling. No profile-switch case is removed or retried;
 the dedicated job must pass before full Windows acceptance can be recorded.
+
+The [isolated follow-up](https://github.com/teo-nex/jew-codex-harness/actions/runs/37391696911)
+passed all forty profile-switch tests in 12 minutes 43 seconds. The concurrent
+main Windows job passed its remaining 335 files with no failures or
+cancellations. All fourteen hosted jobs passed, including full Linux and
+macOS suites, installation checks and three independent fresh Windows
+synthetic-recovery processes. This completes the published cross-platform
+regression checks, not real-provider or internal-reasoning acceptance.
