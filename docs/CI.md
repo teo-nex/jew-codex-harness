@@ -24,10 +24,12 @@ Windows runs three independent fresh-client checks, each with a new profile;
 the first failure stops the step instead of being retried. The step has a
 three-minute ceiling, and each client has a bounded subprocess timeout.
 The router lane does not install browser engines or provider credentials.
-Full-suite files have a ten-minute ceiling on POSIX and a twenty-minute ceiling
-on Windows, where profile-switch crash fixtures repeatedly verify real ACLs.
-The router job has a forty-minute outer ceiling; per-operation deadlines,
-assertions and the separate fresh-client ceiling are unchanged.
+Full-suite files have a ten-minute ceiling. On Windows, the complete
+`chatgpt-profile-switch.test.mjs` file runs in a dedicated
+`windows-profile-recovery` job with a thirty-minute file ceiling; every other
+file stays in the main router job. This prevents its many real ACL checks from
+competing with unrelated fixtures. Both jobs have a forty-minute outer ceiling;
+per-operation deadlines, assertions and the fresh-client ceiling are unchanged.
 
 ### Install smoke matrix (`install-smoke`)
 The dedicated `install-smoke` lane checks installation mechanics across

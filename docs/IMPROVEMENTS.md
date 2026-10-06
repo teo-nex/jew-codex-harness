@@ -3,6 +3,39 @@
 Each numbered feature is committed independently. Offline assertions are not
 live provider or reasoning-enforcement proof. Existing services are untouched.
 
+## Published runtime verification
+
+Checked on 2026-10-06 against
+[`7502e9e`](https://github.com/teo-nex/jew-codex-harness/commit/7502e9e637d170809d56560d42ddf7f67d423add).
+The [published-source workflow](https://github.com/teo-nex/jew-codex-harness/actions/runs/37389372834)
+is the authoritative hosted record; earlier failures and corrections remain
+documented below.
+
+| Check | Result |
+| --- | --- |
+| Python 3.11 and 3.13 on Linux, macOS and Windows | All six jobs passed; 180 harness and 262 server tests per configuration, with platform skips reported by the runner |
+| Full embedded router on Linux | 4,416 passed, 33 platform skips, zero failures |
+| Full embedded router on macOS | 4,417 passed, 32 platform skips, zero failures |
+| Full embedded router on Windows | 4,320 passed, 121 platform skips, zero assertion failures; one profile-switch file cancelled at its 20-minute ceiling; full Windows acceptance pending |
+| Real fresh Codex with synthetic provider failure | Passed on all three OSes; Windows additionally passed three independent new-profile runs |
+| Disposable install, health, verify and Jev rollback | Passed on all three OSes; the Windows base router remains until hosted-VM disposal |
+| Repository hygiene and source archive | Passed; changed runtime files in the archive match the published Git source byte for byte |
+
+Both new process regressions failed against their original implementations:
+delayed owner registration lost descendant rollback, and app-server completion
+left a descendant alive. The corrected process-tree suite passed locally;
+ten independent delayed/ordinary repetitions added twenty passing rollback
+assertions. The local broad Node run passed 4,410 checks with 32 platform skips;
+seven known host-blocked PTY checks were excluded locally, not in hosted CI.
+
+These checks establish deterministic routing, cleanup, installation and
+client transport behavior. They do not establish real-provider availability,
+model quality, billing, or internal reasoning enforcement. No live provider
+generation was run and no existing user profile or service was modified.
+
+The remainder of this document records the implementation and verification
+history, including failures that preceded the published runtime above.
+
 | Feature | Observable acceptance | Status |
 | --- | --- | --- |
 | 1 | Owned route edits, reorder, durable backup, crash recovery and rollback without a service restart; foreign edits refused | verified: `tests/test_core.py` hot-route tests |
@@ -139,3 +172,12 @@ ACL-backed fixtures took up to 47 seconds. CI now permits twenty minutes per
 Windows test file and forty minutes for the router job, without changing any
 operation deadline, assertion or fresh-client limit. This is a bounded runner
 budget adjustment, not proof that the previously interrupted test passed.
+
+The twenty-minute follow-up continued through successful crash recovery,
+catalog rollback and cross-process selection, then reached the same whole-file
+ceiling during its final assertions. The app-server containment regression and
+both real provider variants passed on Windows. CI now runs the complete
+profile-switch file in its own Windows job with a thirty-minute ceiling,
+without competing full-suite workers. The remaining router files keep their
+original ten-minute ceiling. No profile-switch case is removed or retried;
+the dedicated job must pass before full Windows acceptance can be recorded.

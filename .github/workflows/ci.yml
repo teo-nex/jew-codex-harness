@@ -76,9 +76,31 @@ jobs:
       - name: Full router regression suite
         run: >-
           python -c "from pathlib import Path; import os, subprocess;
-          timeout_ms = 1200000 if os.name == 'nt' else 600000;
-          subprocess.run(['node', '--test', '--test-concurrency=4', f'--test-timeout={timeout_ms}',
-          *map(str, sorted(Path('test').glob('*.test.mjs')))], check=True)"
+          tests = sorted(Path('test').glob('*.test.mjs'));
+          tests = [p for p in tests if os.name != 'nt' or p.name != 'chatgpt-profile-switch.test.mjs'];
+          subprocess.run(['node', '--test', '--test-concurrency=4', '--test-timeout=600000',
+          *map(str, tests)], check=True)"
+
+  windows-profile-recovery:
+    name: Windows profile-switch recovery
+    runs-on: windows-latest
+    timeout-minutes: 40
+    defaults:
+      run:
+        working-directory: router
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.19"
+          cache: npm
+          cache-dependency-path: router/package-lock.json
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: npm ci
+      - name: Full profile-switch suite with real Windows ACLs
+        run: node --test --test-timeout=1800000 test/chatgpt-profile-switch.test.mjs
 
   install-smoke:
     name: Install smoke (${{ matrix.os }})
