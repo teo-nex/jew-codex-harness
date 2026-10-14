@@ -57,6 +57,58 @@ class GlobalHookContractTests(unittest.TestCase):
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
         ask.assert_called_once()
 
+    def test_known_canvastty_operations_defer_to_native_permissions(self):
+        operations = ("list_providers", "list_agents", "observe_agent", "wait_for_agent",
+                      "get_agent_result", "spawn_agent", "send_to_agent", "cancel_agent")
+        for action in operations:
+            for model in ("jev/auto", "manual-model"):
+                with self.subTest(action=action, model=model):
+                    event = {"session_id": self.session, "model": model,
+                             "tool_name": "mcp__canvastty_agents__" + action,
+                             "tool_input": {"sessionId": "owned-agent"}}
+                    with mock.patch.object(self.hook, "ask_jev") as ask:
+                        self.assertIsNone(self.hook.pre_tool(event))
+                    ask.assert_not_called()
+
+    def test_native_delegation_preserves_all_arguments_without_goal_capture(self):
+        import copy
+        value = {"provider": "codex", "model": "jev/auto", "profile": "plan",
+                 "cwd": "/workspace/project", "prompt": "Inspect the fixture.",
+                 "launchOptions": {"account-plugin": {"account": "selected-account"}}}
+        event = {"session_id": "uncaptured-session", "model": "jev/auto",
+                 "tool_name": "mcp__canvastty_agents__spawn_agent", "tool_input": value}
+        original = copy.deepcopy(event)
+        with mock.patch.object(self.hook, "ask_jev") as ask:
+            self.assertIsNone(self.hook.pre_tool(event))
+        ask.assert_not_called()
+        self.assertEqual(event, original)
+        rows = [json.loads(line) for line in (self.state / "usage.jsonl").read_text().splitlines()]
+        receipt = next(row for row in rows if row["kind"] == "native_orchestration")
+        self.assertEqual(receipt["policy"], "canvastty")
+        self.assertEqual(receipt["tool"], event["tool_name"])
+        self.assertNotIn("prompt", receipt)
+        self.assertNotIn("launchOptions", receipt)
+
+    def test_other_spawn_paths_and_nested_cli_remain_blocked(self):
+        tools = (("spawn_agent", {}), ("functions.spawn_agent", {}),
+                 ("mcp__other_agents__spawn_agent", {}),
+                 ("mcp__canvastty_agents_extra__spawn_agent", {}),
+                 ("Bash", {"command": "codex exec 'inspect the fixture'"}))
+        for name, value in tools:
+            with self.subTest(name=name), mock.patch.object(self.hook, "ask_jev") as ask:
+                result = self.hook.pre_tool({"session_id": self.session, "model": "jev/auto",
+                                             "tool_name": name, "tool_input": value})
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+                ask.assert_not_called()
+
+    def test_unknown_canvastty_mutation_keeps_default_review(self):
+        event = {"session_id": self.session, "model": "jev/auto",
+                 "tool_name": "mcp__canvastty_agents__replace_workspace", "tool_input": {}}
+        with mock.patch.object(self.hook, "ask_jev", return_value=self.decision()) as ask:
+            result = self.hook.pre_tool(event)
+        self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+        ask.assert_called_once()
+
     def test_named_single_file_patch_uses_bounded_scope_review(self):
         cwd = Path(self.tmp.name) / "workspace"
         cwd.mkdir()
