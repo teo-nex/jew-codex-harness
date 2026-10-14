@@ -71,18 +71,19 @@ class Rate:
 OPENAI = {
     "gpt-6-luna": ("0.10", "0.01", "0.50", "0.125"),
     "gpt-6-sol": ("2.00", "0.20", "10.00", "2.50"),
+    "gpt-6.1-sol": ("2.00", "0.10", "10.00", "2.50"),
     "gpt-6-astra": ("10.00", "1.00", "50.00", "12.50"),
     "gpt-5.6-luna": ("0.20", "0.02", "1.20", "0.25"),
     "gpt-5.6-terra": ("2.00", "0.20", "12.00", "2.50"),
     "gpt-5.6-sol": ("4.00", "0.40", "20.00", "5.00"),
 }
-NEXT_NATIVE = {"gpt-6-luna": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra",
+NEXT_NATIVE = {"gpt-6.1-sol": "gpt-6-astra", "gpt-6-luna": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra",
                "gpt-5.6-luna": "gpt-5.6-terra", "gpt-5.6-terra": "gpt-5.6-sol"}
 
 
 def canonical_model(model):
     leaf = str(model or "").split("/")[-1]
-    match = re.fullmatch(r"(gpt-(?:6|5\.6)-(?:luna|terra|sol|astra))(?:-(?:low|medium|high|xhigh|max))?", leaf)
+    match = re.fullmatch(r"(gpt-(?:6(?:\.1)?|5\.6)-(?:luna|terra|sol|astra))(?:-(?:low|medium|high|xhigh|max))?", leaf)
     return match.group(1) if match else str(model or "")
 
 

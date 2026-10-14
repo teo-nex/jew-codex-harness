@@ -97,7 +97,7 @@ from local_runtime import (
 )
 
 from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
-                            TIERS, decision_from_answers, route)
+                            TIERS, decision_from_answers, questions_for_models, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from request_budget import RequestBudget, AttemptClock, BudgetExceeded
@@ -164,6 +164,9 @@ FALLBACK_DISCOVERY_TIMEOUT = 6.0
 FALLBACK_CACHE_TTL = 30.0
 _fallback_cache = {}
 _fallback_cache_lock = threading.Lock()
+_client_version_cache = {}
+_client_version_lock = threading.Lock()
+CLIENT_VERSION_CACHE_TTL = 300.0
 # The conservative fallback thinking ladder. Existing Go routes declare low/high/max where the
 # native native model ladder exposes low/medium/high/xhigh/max, so a depth keeps its meaning
 # by landing on the middle rung instead of collapsing onto the floor: Jev says
@@ -437,6 +440,40 @@ def _node_binary():
     )
     return next((candidate for candidate in candidates
                  if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK)), None)
+
+
+def installed_codex_version():
+    """Use the bundled router's shim-safe CLI resolver, never a pinned version."""
+    with _client_version_lock:
+        now = time.monotonic()
+        if "at" in _client_version_cache and now - _client_version_cache["at"] < CLIENT_VERSION_CACHE_TTL:
+            return _client_version_cache.get("version")
+        node = _node_binary()
+        helper = os.path.join(os.path.dirname(__file__), "codex_client_version.mjs")
+        version = None
+        if node and os.path.isfile(helper):
+            try:
+                result = subprocess.run([
+                    node, helper,
+                ], capture_output=True, text=True, timeout=3, check=False)
+                match = re.fullmatch(r"codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)", result.stdout.strip())
+                if result.returncode == 0 and match and len(match[1]) <= 32:
+                    version = match[1]
+            except (OSError, subprocess.SubprocessError):
+                pass
+        _client_version_cache.update(at=now, version=version)
+        return version
+
+
+def codex_client_version(headers=None):
+    """Preserve an actual caller version, or detect the installed CLI locally."""
+    headers = {key.lower(): value for key, value in (headers or {}).items()}
+    version = headers.get("version", "")
+    if len(version) <= 32 and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+        return version
+    match = re.search(r"(?:codex[-_][A-Za-z0-9_]*|codex-cli)/(\d+\.\d+\.\d+)",
+                      headers.get("user-agent", ""))
+    return match[1] if match else installed_codex_version()
 
 
 def _fallback_constraints(payload):
@@ -965,6 +1002,7 @@ def _debug_shape(payload):
 
 ROUTE_GLYPHS = {
     "gpt-6-luna": ("luna", "⚡"),      # cheap tier, adaptive thinking
+    "gpt-6.1-sol": ("sol6.1", "🧠"),
     "gpt-6-sol": ("sol", "🧠"),        # reasoning workhorse
     "gpt-6-astra": ("astra", "🚀"),      # frontier
     "gpt-5.6-terra": ("terra", "🌍"),
@@ -2157,7 +2195,11 @@ class Handler(BaseHTTPRequestHandler):
         affinity = cache_affinity(scope, payload)
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
+        models = self._policy_ladder.available_models() if self._policy_ladder else TIERS
+        questions = questions_for_models(models)
         leased = route_lease(scope, payload, step)
+        if leased and leased["model"] not in models:
+            leased = None
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
             decision_source = "project_policy"
@@ -2177,8 +2219,8 @@ class Handler(BaseHTTPRequestHandler):
                 jt0 = time.time()
                 state = jev_state(task, prev_assistant, signals, step, affinity)
                 try:
-                    result = call_jev_routed(key, state, timeout=min(4.0, max(0.05, self._budget.remaining())))
-                    decision = decision_from_answers(result.get("answers"))
+                    result = call_jev_routed(key, state, questions=questions, timeout=min(4.0, max(0.05, self._budget.remaining())))
+                    decision = decision_from_answers(result.get("answers"), models=models)
                     raw_usage = result.get("usage") or {}
                     if not isinstance(raw_usage, dict):
                         raw_usage = {}
@@ -2647,6 +2689,9 @@ class Handler(BaseHTTPRequestHandler):
             # the parent consumes the marker and never forwards it upstream.
             if external:
                 headers["Authorization"] = "Bearer " + external["key"]
+                version = codex_client_version(getattr(self, "headers", None))
+                if version:
+                    headers["Version"] = version
                 if external.get("account"):
                     headers["X-OmniRoute-Connection"] = external["account"]
             else:

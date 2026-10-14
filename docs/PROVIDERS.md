@@ -22,7 +22,8 @@ identifiers; they are labels, not predefined provider names. Each entry has:
 - `transport`: `omniroute` (default) or `native` (the bundled Codex router).
 - `model`: one exact destination ID for every Jev decision; or `models`: a
   complete mapping from `gpt-6-luna`, `gpt-5.6-terra`, `gpt-6-sol` and
-  `gpt-6-astra` to exact destination IDs. Do not supply both fields.
+  `gpt-6-astra` to exact destination IDs. It may additionally map `gpt-6.1-sol`;
+  existing four-model mappings remain valid. Do not supply both fields.
 - `connection_ids`: optional ordered list of 1-32 unique OmniRoute account IDs.
   Omitting it lets the existing gateway choose the connection. Native routes
   cannot specify external account IDs.
@@ -38,6 +39,29 @@ the mapping. See [reasoning routing](REASONING.md). Unknown support is recorded
 as unknown, not inferred from a provider name. An empty profile object is valid.
 Mixed legacy/v2 fields, duplicate IDs, partial model mappings and invalid
 reasoning profiles are rejected before installation.
+
+## Optional model tiers
+
+Jev can choose GPT-6.1 Sol separately from GPT-6 Sol. Add
+`"gpt-6.1-sol": "codex/gpt-6.1-sol"` to each mapped provider that has verified
+this exact destination. A choice is offered only when every mapped fallback
+provider includes it; fixed routes still replace any choice explicitly, and
+unmapped native routes preserve it. Legacy sequences keep their original four
+choices. The wizard retains its four required destinations; optional mappings
+can be added to the protected provider file before installation or reconfiguration.
+
+For external Responses requests the harness forwards the caller's Codex version
+when present, otherwise detects the installed CLI through the bundled router's
+shim-safe resolver (cached for five minutes). Explicit CLI configuration takes
+priority, then a real CLI on PATH or in the user's local bin, then bundled desktop
+copies. Router shims are never executed. It never fabricates a newer version.
+This matters when a gateway's default client version predates a newly added model.
+The verified GPT-6.1 Sol reasoning levels are low, medium, high, xhigh and max:
+[official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+Gateway adapters can narrow that range; declare their observed limits in
+`reasoning_profiles` rather than assuming the entire published range works on
+every path. Its API rate is included in reports; native credit rates remain unknown until
+independently verified. Mandatory Astra architecture and final/risk reviews stay intact.
 
 ## Fallback and recovery
 

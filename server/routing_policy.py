@@ -2,14 +2,15 @@
 import math
 import os
 
-POLICY_VERSION = "split-v12-luna6-sol6"
+POLICY_VERSION = "split-v13-optional-models"
 LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
 TERRA = "gpt-5.6-terra"
-TIERS = (LUNA, TERRA, SOL, ASTRA)
+SOL61 = "gpt-6.1-sol"
+TIERS = (LUNA, TERRA, SOL, SOL61, ASTRA)
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LEASES = ("one_call", "tool_chain", "user_turn")
 
-MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL, "astra": ASTRA}
+MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL, "sol61": SOL61, "astra": ASTRA}
 ASTRA_POLICY = {
     "astra": (
         "Remaining work is project architecture, independent final code review, or "
@@ -36,6 +37,11 @@ MODEL_PROFILES = {
         "Infer implied intent, resolve underspecified goals, investigate and choose an approach; "
         "complex implementation, robust tests, multi-file refactoring or debugging. "
         "Avoid needless clarification loops."
+    ),
+    "sol61": (
+        "Current Sol workhorse for complex coding, computer use and professional work. "
+        "Prefer over older Sol for a cold start; retain a sufficient hot model. "
+        "Mandatory architecture and final/risk review still require Astra."
     ),
     "astra": (
         "Intermittent or concurrency failures, distributed-systems architecture or strong "
@@ -81,7 +87,7 @@ QUESTIONS = {
         "instructions": (
             "Minimize total task cost including corrections and clarification turns. "
             "Choose sufficient capability for remaining work. "
-            "Cost order: luna < terra < sol < astra. "
+            "Cost order: luna < terra < sol = sol61 < astra. "
             "Use cache_state model state, read_pct, age_s and context_k as reprocessing-cost "
             "evidence. Keep a sufficient last model, especially with large context; switch "
             "when capability demands it. hot means a real read; warming only recent success. "
@@ -106,6 +112,22 @@ QUESTIONS = {
         "criteria": LEASE_PROFILES,
     },
 }
+
+
+def questions_for_models(models):
+    """Offer only models every configured provider can route explicitly."""
+    choices = {key: value for key, value in MODEL_IDS.items() if value in models}
+    if not choices or set(models) - set(TIERS):
+        raise ValueError("invalid available model set")
+    question = {**QUESTIONS["model"], "criteria": {
+        key: MODEL_PROFILES[key] for key in choices}}
+    # Do not mention an unavailable choice in the cost-order rubric.
+    order = " < ".join(" = ".join(key for key in group if key in choices)
+                       for group in (("luna",), ("terra",), ("sol", "sol61"), ("astra",))
+                       if any(key in choices for key in group))
+    question["instructions"] = question["instructions"].replace(
+        "Cost order: luna < terra < sol = sol61 < astra.", "Cost order: " + order + ".")
+    return {**QUESTIONS, "model": question}
 
 
 def route_choice(model, effort, astra_required=False, lease="one_call"):
@@ -162,13 +184,13 @@ def _validated_choice(answers, name, choices):
     return choice, probabilities, confidence
 
 
-def decision_from_answers(answers):
+def decision_from_answers(answers, models=TIERS):
     """Validate Jev's decisions and enforce mandatory Astra categories."""
     astra_policy, astra_probs, astra_conf = _validated_choice(
         answers, "astra_policy", ASTRA_POLICY
     )
     model_choice, model_probs, model_conf = _validated_choice(
-        answers, "model", MODEL_IDS
+        answers, "model", {key: model for key, model in MODEL_IDS.items() if model in models}
     )
     effort, effort_probs, effort_conf = _validated_choice(
         answers, "effort", EFFORTS

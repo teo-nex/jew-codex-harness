@@ -14,7 +14,7 @@ import sys
 from . import core
 from . import live_verify
 from . import catalog
-from server.provider_ladder import NATIVE_MODELS, validate_config
+from server.provider_ladder import REQUIRED_NATIVE_MODELS, validate_config
 
 
 def _provider_sequence(read, models=None) -> dict:
@@ -42,7 +42,7 @@ def _provider_sequence(read, models=None) -> dict:
             provider["models"] = {
                 model: destination(prefix + " destination for " + model,
                                model if transport == "native" else "")
-                for model in NATIVE_MODELS
+                for model in REQUIRED_NATIVE_MODELS
             }
         else:
             raise core.InstallError("Model selection must be fixed or jev")
