@@ -67,6 +67,15 @@ configured native route without advancing the incompatible sticky provider.
 Without such a native route, it fails clearly instead of inventing one. Legacy
 ladder configurations retain the native-only handoff for this history.
 
+For external routes, client-executed `tool_search` is declared on the wire as
+an ordinary function with the same schema. Returned calls are restored to
+native `tool_search_call` items for Codex. This keeps tool-only discovery
+responses visible to gateway content checks. The canonical request and native
+history remain unchanged; history support still requires the declaration above.
+Ambiguous collisions with an ordinary function named `tool_search` fail locally
+rather than reinterpreting that function. Genuine failure events after completion
+remain errors and are never silently discarded.
+
 ## Legacy configuration
 
 [`config/ladder.example.json`](../config/ladder.example.json) remains supported

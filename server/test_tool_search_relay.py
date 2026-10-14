@@ -3,12 +3,48 @@
 import json
 import unittest
 
-from jev_server import SummaryMarker
+from jev_server import SummaryMarker, external_tool_search_payload
 
 
 def event(kind, **fields):
     value = {"type": kind, **fields}
     return f"event: {kind}\ndata: {json.dumps(value)}\n\n"
+
+
+class ToolSearchPayloadTests(unittest.TestCase):
+    def test_external_declaration_changes_without_mutating_canonical_history(self):
+        for schema in ({"type": "object", "properties": {"query": {"type": "string"}}},
+                       {"type": "object", "properties": {"queries": {"type": "array", "items": {"type": "string"}}}}):
+            with self.subTest(schema=schema):
+                payload = {"tools": [{"type": "tool_search", "execution": "client", "description": "Discovery", "parameters": schema},
+                                     {"type": "function", "name": "ordinary_tool"}],
+                           "input": [{"type": "tool_search_call", "execution": "client", "call_id": "call_a", "arguments": {"query": "fixture"}},
+                                     {"type": "tool_search_output", "execution": "client", "call_id": "call_a", "tools": []}],
+                           "tool_choice": {"type": "tool_search"}}
+                original = json.loads(json.dumps(payload))
+                wire = external_tool_search_payload(payload)
+                self.assertEqual(payload, original)
+                self.assertIs(wire["input"], payload["input"])
+                self.assertEqual(wire["tools"][0], {"type": "function", "name": "tool_search", "description": "Discovery", "parameters": schema})
+                self.assertIs(wire["tools"][1], payload["tools"][1])
+                self.assertEqual(wire["tool_choice"], {"type": "function", "name": "tool_search"})
+
+    def test_unrelated_and_server_executed_tools_are_unchanged(self):
+        for tools in (None, [], [{"type": "function", "name": "tool_search"}],
+                      [{"type": "tool_search", "execution": "server"}], [{"type": "web_search"}]):
+            payload = {"tools": tools, "input": "fixture"}
+            self.assertIs(external_tool_search_payload(payload), payload)
+
+    def test_discovery_name_collisions_fail_closed(self):
+        native = {"type": "tool_search", "execution": "client"}
+        for other in ({"type": "function", "name": "tool_search"},
+                      {"type": "function", "function": {"name": "tool_search"}}, native.copy()):
+            with self.subTest(other=other):
+                payload = {"tools": [native, other]}
+                original = json.loads(json.dumps(payload))
+                with self.assertRaisesRegex(ValueError, "Ambiguous"):
+                    external_tool_search_payload(payload)
+                self.assertEqual(payload, original)
 
 
 class ToolSearchRelayTests(unittest.TestCase):

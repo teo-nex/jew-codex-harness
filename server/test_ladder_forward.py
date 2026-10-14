@@ -49,6 +49,47 @@ class LadderForwardTests(unittest.TestCase):
             self.assertEqual(handler.wfile.getvalue(), b"")
             self.assertEqual(logged.call_args.args[0]["ladder_stage"], "stream_incomplete")
 
+    def test_external_client_discovery_uses_function_wire_format(self):
+        sent = []
+        call = {"type": "function_call", "id": "fc_discovery", "call_id": "call_discovery",
+                "name": "tool_search", "arguments": '{"query":"fixture tool"}'}
+        def frame(kind, **fields):
+            return ("event: " + kind + "\ndata: " + json.dumps({"type": kind, **fields}) + "\n\n").encode()
+        class Response:
+            status = 200
+            def getheader(self, name):
+                return "text/event-stream" if name == "Content-Type" else None
+            def read(self, *args):
+                body = (frame("response.created", response={"id": "r"})
+                        + frame("response.output_item.added", output_index=0, item=call.copy())
+                        + frame("response.output_item.done", output_index=0, item=call.copy())
+                        + frame("response.completed", response={"id": "r", "status": "completed", "output": [call.copy()]}))
+                if sent[-1]["tools"][0]["type"] == "tool_search":
+                    body += frame("response.failed", response={"id": "r", "status": "failed",
+                                                              "error": {"code": "empty_content"}})
+                return body
+        class Connection:
+            def __init__(self, *args, **kwargs): pass
+            def request(self, method, path, body, headers): sent.append(json.loads(body))
+            def getresponse(self): return Response()
+            def close(self): pass
+        payload = {"model": "gateway/model", "input": "Find the fixture tool", "stream": True,
+                   "tools": [{"type": "tool_search", "execution": "client", "parameters": {"type": "object"}}]}
+        original = json.loads(json.dumps(payload))
+        handler = self.handler(); handler._attempts = []
+        with mock.patch.object(jev.http.client, "HTTPConnection", Connection):
+            status, _, _, _, unwritten, _ = handler._forward(
+                payload, "/v1/responses", True, False, "", "gateway/model",
+                external={"host": "127.0.0.1", "port": 20128, "key": "synthetic"})
+        self.assertEqual(status, 200)
+        self.assertIsNone(unwritten)
+        self.assertEqual(sent[0]["tools"][0]["type"], "function")
+        self.assertEqual(sent[0]["tools"][0]["name"], "tool_search")
+        self.assertEqual(payload, original)
+        wire = handler.wfile.getvalue()
+        self.assertIsNone(jev.external_sse_issue(wire))
+        self.assertIn(b'"type": "tool_search_call"', wire)
+
     def test_post_terminal_error_without_space_stays_unwritten(self):
         body = (b'event: response.created\n'
                 b'data: {"type":"response.created","response":{"id":"r"}}\n\n'

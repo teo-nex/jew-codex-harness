@@ -1435,6 +1435,35 @@ def has_tool_search_history(payload):
     )
 
 
+def external_tool_search_payload(payload):
+    """Use a function wire declaration for client discovery on external routes.
+
+    The canonical history stays native: a compatible gateway must preserve it.
+    SummaryMarker restores the returned function calls to client discovery items.
+    """
+    tools = payload.get("tools")
+    if not isinstance(tools, list):
+        return payload
+    discovery = [tool for tool in tools if isinstance(tool, dict)
+                 and tool.get("type") == "tool_search" and tool.get("execution") == "client"]
+    if not discovery:
+        return payload
+    if len(discovery) != 1 or any(
+        isinstance(tool, dict) and (tool.get("name") == "tool_search"
+            or isinstance(tool.get("function"), dict) and tool["function"].get("name") == "tool_search")
+        for tool in tools
+    ):
+        raise ValueError("Ambiguous client discovery tool name")
+    native = discovery[0]
+    function = {"type": "function", "name": "tool_search"}
+    function.update({key: native[key] for key in ("description", "parameters", "strict") if key in native})
+    routed = {**payload, "tools": [function if tool is native else tool for tool in tools]}
+    choice = payload.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") == "tool_search":
+        routed["tool_choice"] = {"type": "function", "name": "tool_search"}
+    return routed
+
+
 class SummaryMarker:
     """Append the routed tag to reasoning summaries (the thread's thinking blocks).
 
@@ -2551,6 +2580,12 @@ class Handler(BaseHTTPRequestHandler):
         reopens, when it announced one.
         """
         attempt_started = time.monotonic()
+        try:
+            wire_payload = external_tool_search_payload(payload) if external else payload
+        except ValueError:
+            self._attempts.append({"model": model, "status": 400, "http_status": None,
+                                   "completion": "ambiguous_tool_search", "usage": None})
+            return 400, "json", "application/json", False, b'{"error":{"message":"ambiguous client discovery tool name"}}', None
         budget = getattr(self, "_budget", None) or RequestBudget()
         self._budget = budget
         try:
@@ -2560,7 +2595,7 @@ class Handler(BaseHTTPRequestHandler):
                                    "completion": "budget_exhausted", "usage": None})
             return 504, "json", "application/json", False, b'{"error":{"message":"request budget exhausted"}}', None
         clock = AttemptClock(budget)
-        body = json.dumps(payload).encode("utf-8")
+        body = json.dumps(wire_payload).encode("utf-8")
         conn = http.client.HTTPConnection(
             external["host"], external["port"], timeout=clock.timeout()
         ) if external else http.client.HTTPConnection(*ROUTER, timeout=clock.timeout())
