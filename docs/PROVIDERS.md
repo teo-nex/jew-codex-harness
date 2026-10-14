@@ -57,10 +57,15 @@ runtime state safeguard, not permission to bypass the install manifest or adopt
 an existing profile. Corrupt recovery state fails closed with a controlled error.
 
 An incomplete response already exposed to the client is never replayed in the
-same request. A Codex `tool_search_output` history cannot be represented by this
-OmniRoute adapter: it uses the first explicitly configured native route for
-that request only, without changing the sticky provider. Without such a route,
-the request fails clearly instead of silently inventing one.
+same request. For Codex `tool_search_output` history, an ordered OmniRoute route
+may declare `"supports_tool_search_history": true` after its exact gateway/backend
+path has been verified to preserve Responses tool discovery and subsequent tool
+calls. The declaration defaults to false and is checked again on each fallback;
+it is not inferred from provider or model names. Compatible routes receive the
+canonical history unchanged. Otherwise, the request uses the first explicitly
+configured native route without advancing the incompatible sticky provider.
+Without such a native route, it fails clearly instead of inventing one. Legacy
+ladder configurations retain the native-only handoff for this history.
 
 ## Legacy configuration
 

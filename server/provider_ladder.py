@@ -33,7 +33,7 @@ def validate_ordered_config(value):
         raise ValueError("providers must contain between 1 and 32 routes")
     result, ids = [], set()
     for provider in providers:
-        if not isinstance(provider, dict) or set(provider) - {"id", "transport", "model", "models", "connection_ids", "billing"}:
+        if not isinstance(provider, dict) or set(provider) - {"id", "transport", "model", "models", "connection_ids", "billing", "supports_tool_search_history"}:
             raise ValueError("Invalid provider fields")
         identity = provider.get("id")
         if (not isinstance(identity, str) or not re.fullmatch(r"[a-z][a-z0-9_-]{0,63}", identity)
@@ -41,6 +41,9 @@ def validate_ordered_config(value):
             raise ValueError("Provider IDs must be unique lowercase identifiers")
         ids.add(identity)
         transport = provider.get("transport", "omniroute")
+        if ("supports_tool_search_history" in provider
+                and type(provider["supports_tool_search_history"]) is not bool):
+            raise ValueError("supports_tool_search_history must be a boolean")
         if "billing" in provider and provider["billing"] not in ("free", "subscription", "paid"):
             raise ValueError("billing must be free, subscription or paid")
         if transport not in ("omniroute", "native"):
@@ -309,6 +312,7 @@ class Ladder:
                 "account": accounts[account_index] if accounts else None,
                 "effort": effort, "transport": provider["transport"],
                 "selected_tier": tier,
+                "supports_tool_search_history": provider.get("supports_tool_search_history", False),
                 "provider_index": index, "account_index": account_index,
                 "config_hash": self.fingerprint}
 

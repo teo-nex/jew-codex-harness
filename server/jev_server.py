@@ -1426,8 +1426,8 @@ def apply_route_payload(payload, model, effort, original_reasoning, injected_upd
     return next_update, transport
 
 
-def omniroute_cannot_represent_tool_search_history(payload):
-    """OmniRoute's Chat Completions adapter rejects this Responses item."""
+def has_tool_search_history(payload):
+    """Client-executed discovery requires a route that preserves its history."""
     items = payload.get("input")
     return isinstance(items, list) and any(
         isinstance(item, dict) and item.get("type") == "tool_search_output"
@@ -2394,13 +2394,23 @@ class Handler(BaseHTTPRequestHandler):
         self._attempts = []
         self._budget = getattr(self, "_budget", None) or RequestBudget(ladder.config.get("request_budget"))
         last_error = None
-        force_main_for_call = omniroute_cannot_represent_tool_search_history(payload)
+        needs_tool_search_history = has_tool_search_history(payload)
+        force_main_for_call = False
         for attempt_index in range(ladder.attempt_limit + 1):
             forced_native = force_main_for_call
             try:
                 chosen = (ladder.native_route(base_model, effort) if force_main_for_call
                           else ladder.route(scope, base_model, effort,
                                             recover_primary=attempt_index == 0))
+                if (chosen is not None and chosen["stage"] != "exhausted"
+                        and needs_tool_search_history
+                        and chosen.get("transport", "native" if chosen["stage"] == "main" else "omniroute") != "native"
+                        and not chosen.get("supports_tool_search_history", False)):
+                    # Capability is an explicit route declaration, not a model-
+                    # name heuristic. Incompatible routes keep the native-only
+                    # handoff without advancing their sticky provider state.
+                    chosen = ladder.native_route(base_model, effort)
+                    forced_native = True
             except (OSError, ValueError, RuntimeError) as exc:
                 return self._json(503, {"error": {"message": "provider ladder state unavailable",
                                                "type": type(exc).__name__}})
