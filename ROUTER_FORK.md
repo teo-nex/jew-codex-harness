@@ -34,3 +34,8 @@ service never pulls or updates another repository by itself.
   prevents a descheduled intermediate owner from being terminated before it
   can forward the signal and wait for a descendant's rollback barrier. The
   regression fixture deliberately delays tree registration after spawn.
+
+- Client-executed tool discovery is actionable Responses output. The empty
+  completion guard preserves `tool_search_call` item events and completed
+  snapshots so discovery-only turns reach the client without duplicate retries.
+  Server-side search and discovery results alone do not count as client output.
