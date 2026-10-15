@@ -130,11 +130,13 @@ class TandemHandoff(unittest.TestCase):
         self.enterContext(mock.patch.object(jev, "log_line", side_effect=record))
         self.edge = ThreadingHTTPServer(("127.0.0.1", 0), Edge)
         threading.Thread(target=self.edge.serve_forever, daemon=True).start()
-        # Keep the decision local: no Jev call (so no API key), dry mode on.
+        # Pin the intended frontier route locally; do not depend on the technical-error fallback policy.
         self.saved = (jev.ROUTER, jev.caller_secret, jev.load_key, jev.native_dry)
         jev.ROUTER = ("127.0.0.1", self.edge.server_address[1])
         jev.caller_secret = lambda: "test-caller-secret"
-        jev.load_key = lambda: ""
+        jev.load_key = lambda: "fixture-key"
+        self.enterContext(mock.patch.object(jev, "call_jev_routed",
+            return_value=jev_answer(jev.ASTRA, "medium", 0.95)))
         jev.native_dry = lambda: "manual"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), jev.Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -369,7 +371,7 @@ class TandemHandoff(unittest.TestCase):
         for tier, depth, client_speed in ((jev.LUNA, "low", "priority"),
                                          (jev.TERRA, "high", "priority"),
                                          (jev.LUNA, "medium", "fast"),
-                                         (jev.SOL, "high", "priority"),
+                                         (jev.SOL61, "high", "priority"),
                                          (jev.ASTRA, "xhigh", "fast")):
             with self.subTest(tier=tier, depth=depth), mock.patch.object(
                 jev, "call_jev_routed", return_value=jev_answer(tier, depth, 0.95)

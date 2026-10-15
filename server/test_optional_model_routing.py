@@ -14,7 +14,7 @@ from unittest import mock
 import jev_server as jev
 from provider_ladder import Ladder, NATIVE_MODELS, REQUIRED_NATIVE_MODELS, validate_config
 from routing_policy import (ASTRA, MODEL_IDS, QUESTIONS, SOL61, decision_from_answers,
-                            questions_for_models, route_choice)
+                            automatic_models, workhorse, questions_for_models, route_choice)
 
 
 class OptionalModelRouting(unittest.TestCase):
@@ -48,12 +48,38 @@ class OptionalModelRouting(unittest.TestCase):
         with self.assertRaises(ValueError):
             validate_config(config)
 
+    def test_auto_replaces_legacy_sol_but_explicit_routes_remain_valid(self):
+        self.assertNotIn("gpt-6-sol", automatic_models(NATIVE_MODELS))
+        self.assertIn("gpt-6-sol", automatic_models(REQUIRED_NATIVE_MODELS))
+        self.assertEqual(workhorse(NATIVE_MODELS), SOL61)
+        self.assertEqual(workhorse(REQUIRED_NATIVE_MODELS), "gpt-6-sol")
+        self.assertNotEqual(workhorse(("gpt-6-luna", ASTRA)), ASTRA)
+        with self.assertRaises(ValueError):
+            workhorse((ASTRA,))
+
+    def test_ladder_receives_bounded_failure_reason_instead_of_frontier_escalation(self):
+        for models, expected in ((NATIVE_MODELS, SOL61), (REQUIRED_NATIVE_MODELS, "gpt-6-sol")):
+            config = {"providers": [{"id": "gateway", "models": {m: "gateway/" + m for m in models}}]}
+            handler = object.__new__(jev.Handler)
+            handler.path = "/v1/responses"
+            handler._body = lambda _: {"model": "jev/auto", "input": "read fixture", "prompt_cache_key": "fixture-bounded"}
+            handler._serve_ladder = mock.Mock()
+            with mock.patch.dict(os.environ, {"JEV_LADDER_MODE": "active"}), \
+                 mock.patch.object(jev, "_provider_ladder", return_value=Ladder(config, self.state)), \
+                 mock.patch.object(jev, "load_key", return_value="fixture-key"), \
+                 mock.patch.object(jev, "route_lease", return_value=None), \
+                 mock.patch.object(jev.os.path, "exists", return_value=False), \
+                 mock.patch.object(jev, "call_jev_routed", side_effect=TimeoutError("private fixture")):
+                handler._post()
+            self.assertEqual(handler._serve_ladder.call_args.args[2:4], (expected, "medium"))
+            self.assertEqual(handler._serve_ladder.call_args.kwargs["routing_gate"], "jev_error:TimeoutError")
+
     def test_choice_distribution_is_validated_against_the_offered_set(self):
         original = copy.deepcopy(QUESTIONS)
         for models in (REQUIRED_NATIVE_MODELS, NATIVE_MODELS):
             questions = questions_for_models(models)
             choices = questions['model']['criteria']
-            self.assertEqual({MODEL_IDS[key] for key in choices}, set(models))
+            self.assertEqual({MODEL_IDS[key] for key in choices}, set(automatic_models(models)))
             selected = SOL61 if SOL61 in models else REQUIRED_NATIVE_MODELS[0]
             pairs = route_choice(selected, 'high')
             answer = {key: {'choice': value, 'confidence': 0.99} for key, value in pairs.items()}

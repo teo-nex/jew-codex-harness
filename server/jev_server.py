@@ -96,8 +96,8 @@ from local_runtime import (
     private_regular, protect_logs,
 )
 
-from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
-                            TIERS, decision_from_answers, questions_for_models, route)
+from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, SOL61, TERRA,
+                            TIERS, automatic_models, workhorse, decision_from_answers, questions_for_models, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from request_budget import RequestBudget, AttemptClock, BudgetExceeded
@@ -821,7 +821,7 @@ def extract(payload):
         n_items = len(inp)
         tail = inp[-6:]
         for item in tail:
-            if isinstance(item, dict) and item.get("type") == "function_call_output":
+            if isinstance(item, dict) and item.get("type") in ("function_call_output", "custom_tool_call_output", "tool_search_output"):
                 tool_tail = True
             if isinstance(item, dict) and isinstance(item.get("content"), list):
                 for part in item["content"]:
@@ -937,6 +937,23 @@ def classify(payload):
                     "results": errors[:3] if errors else rows[-3:],
                 }
                 detail["errored"] = bool(errors)
+        elif ltype == "tool_search_output":
+            # Discovery results are tool plumbing, not a new complex user task. Keep names only;
+            # tool schemas and descriptions remain exclusively in the executor's full context.
+            discovered = last.get("tools")
+            names, pending = [], list(discovered[:32]) if isinstance(discovered, list) else []
+            for _ in range(64):
+                if not pending or len(names) >= 16:
+                    break
+                tool = pending.pop(0)
+                if not isinstance(tool, dict):
+                    continue
+                if isinstance(tool.get("tools"), list):
+                    pending.extend(tool["tools"][:32])
+                elif isinstance(tool.get("name"), str):
+                    names.append(tool["name"][:120])
+            detail.update(step_type="tool_step", digest=("Available tools: " + ", ".join(names))[:DIGEST_CHARS],
+                          tool_call={"name": "tool_search"})
         elif last.get("role") == "user":
             detail["step_type"] = "user_turn"
     return detail
@@ -2217,7 +2234,7 @@ class Handler(BaseHTTPRequestHandler):
         affinity = cache_affinity(scope, payload)
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
-        models = self._policy_ladder.available_models() if self._policy_ladder else TIERS
+        models = automatic_models(self._policy_ladder.available_models() if self._policy_ladder else TIERS)
         questions = questions_for_models(models)
         leased = route_lease(scope, payload, step)
         if leased and leased["model"] not in models:
@@ -2255,11 +2272,11 @@ class Handler(BaseHTTPRequestHandler):
                     gate = decision["gate"]
                     decision_source = "jev"
                 except Exception as exc:
-                    model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", f"jev_error:{type(exc).__name__}"
+                    model, effort, speed, gate = workhorse(models), "medium", "default", f"jev_error:{type(exc).__name__}"
                     decision_source = "technical_fallback"
                 jev_ms = int((time.time() - jt0) * 1000)
             else:
-                model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", "no_key_or_task"
+                model, effort, speed, gate = workhorse(models), "medium", "default", "no_key_or_task"
                 decision_source = "technical_fallback"
 
         if (os.environ.get("JEV_LADDER_MODE") == "active"
@@ -2268,7 +2285,7 @@ class Handler(BaseHTTPRequestHandler):
                 and payload["prompt_cache_key"].strip()))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
                                       jev_usage, stream_requested, debug, t0, jev_ms,
-                                      decision_source)
+                                      decision_source, routing_gate=gate)
 
         shadow_enabled = os.path.exists(SHADOW_PATH)
 
@@ -2461,7 +2478,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_ladder(self, payload, scope, base_model, effort, decision, step,
                       jev_usage, stream_requested, debug, started_at=None, jev_ms=None,
-                      decision_source=None):
+                      decision_source=None, routing_gate=None):
         """One canonical Codex replay, with quota-aware provider priority."""
         try:
             ladder = getattr(self, "_policy_ladder", None) or _provider_ladder()
@@ -2572,7 +2589,9 @@ class Handler(BaseHTTPRequestHandler):
                           "reasoning_status": resolved["status"],
                           "reasoning_source": resolved["source"],
                           "jev_usage": jev_usage, "attempts": self._attempts,
-                          "decision_source": decision_source,
+                          "decision_source": decision_source, "gate": routing_gate,
+                          "base_tier": decision.get("base_model") if decision else None,
+                          "confidence": decision.get("confidence") if decision else None,
                           "jev_ms": jev_ms,
                           "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                           "status": status, "cache_scope": scope, "stream": stream_requested})

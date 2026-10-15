@@ -42,7 +42,8 @@ reasoning profiles are rejected before installation.
 
 ## Optional model tiers
 
-Jev can choose GPT-6.1 Sol separately from GPT-6 Sol. Add
+When GPT-6.1 Sol is available across the provider sequence, automatic routing
+offers it instead of GPT-6 Sol. Manual model IDs and legacy mappings remain valid. Add
 `"gpt-6.1-sol": "codex/gpt-6.1-sol"` to each mapped provider that has verified
 this exact destination. A choice is offered only when every mapped fallback
 provider includes it; fixed routes still replace any choice explicitly, and
@@ -61,7 +62,11 @@ The verified GPT-6.1 Sol reasoning levels are low, medium, high, xhigh and max:
 Gateway adapters can narrow that range; declare their observed limits in
 `reasoning_profiles` rather than assuming the entire published range works on
 every path. Its API rate is included in reports; native credit rates remain unknown until
-independently verified. Mandatory Astra architecture and final/risk reviews stay intact.
+independently verified. Routine commands and orchestration bookkeeping can use Luna
+with low effort. A confidence score alone never upgrades a valid small-model decision.
+A technical decision failure falls back to Sol 6.1 (or Sol 6 on legacy-only routes),
+medium effort; the exception type is recorded without private error text.
+Mandatory Astra architecture and final/risk reviews stay intact.
 
 ## Fallback and recovery
 
