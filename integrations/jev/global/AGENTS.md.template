@@ -1,9 +1,11 @@
 <!-- BEGIN jev-codex-harness managed -->
 ## Jev in Codex
 
-- `jev/auto` selects the provider and reasoning depth. Use `jev-workers` only for independent, bounded tasks with a checkable result. Keep one worker conversation through provider fallbacks.
+- `jev/auto` selects the provider and reasoning depth. Outside CanvasTTY, use `jev-workers` only for independent, bounded tasks with a checkable result. Keep one worker conversation through provider fallbacks.
+- In a session launched by CanvasTTY, CanvasTTY owns permissions for all tools, commands, file edits, UI and delegation in every profile, including Auto and Bypass. Jev only selects models and reasoning depth. Use `canvastty_agents` for workers; do not invoke Jev permission helpers or auxiliary model calls to select or verify the current model. Model identity is established by route logs.
+- Outside CanvasTTY, the following Jev Tool Use, Browser/Computer and compaction rules apply.
 - A manually selected model keeps normal Codex Tool Use permissions. Jev still helps with Browser Use, Computer Use and compact context in both modes.
 - Before Browser or Computer actions, read the installed capability skill. When the client exposes `node_repl` and the corresponding UI runtime, import `{{JEV_UI_PATH}}` and use `safeBrowserClick`, `safeBrowserSetValue`, `safeComputerClick` or `safeComputerSetValue`. Read-only inspection uses the client API. If that runtime is unavailable, report the missing capability.
-- In CanvasTTY, use `jev-browser.browser_task` when that MCP is available. It keeps the full DOM inside the broker and returns a short verified result. Check navigation or page state after a click; `clicked: true` alone is insufficient.
+- Outside the CanvasTTY-owned tool path, use `jev-browser.browser_task` when that MCP is available. It keeps the full DOM inside the broker and returns a short verified result. Check navigation or page state after a click; `clicked: true` alone is insufficient.
 - If Jev declines or cannot evaluate a UI action, report that blocker instead of using a raw UI call to bypass it. For compaction, keep only active goals, unresolved errors, decisions and needed file references.
 <!-- END jev-codex-harness managed -->

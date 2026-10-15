@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Global Codex hook: cheap local guards, Jev review of risky calls, compact carry."""
+"""Codex hooks: CanvasTTY-owned permissions, standalone Jev guards, local context carry."""
 
 import hashlib
 import json
@@ -77,6 +77,25 @@ SKILL_ALIASES = {
     "browser:control-in-app-browser": ("браузер", "сайт", "страниц"),
     "canvastty-codex-orchestrator": ("canvastty", "канвас", "терминал"),
 }
+
+
+def canvastty_session():
+    """Recognize CanvasTTY's inherited launch context, never a tool argument.
+
+    This is an ownership hint, not a permission grant. CanvasTTY's own hook
+    authenticates the capability and enforces its verdict independently.
+    """
+    if os.environ.get("CANVASTTY_RUNTIME_PROVIDER") != "codex":
+        return False
+    fields = ("CANVASTTY_RUNTIME_ADDRESS", "CANVASTTY_RUNTIME_TERMINAL_SESSION_ID",
+              "CANVASTTY_RUNTIME_CAPABILITY")
+    if not all(os.environ.get(field, "").strip() for field in fields):
+        return False
+    try:
+        uuid.UUID(os.environ["CANVASTTY_RUNTIME_TERMINAL_SESSION_ID"])
+    except ValueError:
+        return False
+    return True
 
 
 def readonly_shell(command):
@@ -368,6 +387,8 @@ def prompt(event):
     text = compact_goal(event.get("prompt"))
     if not session or not text:
         return None
+    native_owner = canvastty_session()
+    owner = "canvastty" if native_owner else "jev"
     model = event.get("model")
     mode = ("jev_auto" if jev_auto_model(event) else "manual") if isinstance(model, str) and model.strip() else None
     transition = {}
@@ -381,6 +402,9 @@ def prompt(event):
         else:
             value["active_goal"] = text
         value["latest_turn"] = event.get("turn_id")
+        if value.get("permission_owner") != owner:
+            value["permission_owner"] = owner
+            transition["changed"] = True
         if mode and value.get("tool_mode") != mode:
             value["tool_mode"] = mode
             transition["changed"] = True
@@ -389,7 +413,7 @@ def prompt(event):
             transition["omniroute"] = True
     update_state(session, edit)
     hint = None
-    if not CONTINUE.fullmatch(text):
+    if not native_owner and not CONTINUE.fullmatch(text):
         try:
             hint = skill_hint(text)
         except (OSError, ValueError):
@@ -399,12 +423,18 @@ def prompt(event):
         mode_notice = ("Active model is jev/auto: Jev reviews ordinary Tool Use; use jev-workers or CanvasTTY canvastty_agents for subagents. CanvasTTY owns native orchestration permissions. "
                        if mode == "jev_auto" else
                        "Active model was selected manually: ordinary Tool Use and delegation are not vetoed by Jev. ")
-        notices.append(mode_notice + "Browser Use, Computer Use, and context compaction still use Jev.")
+        if native_owner:
+            notices.append("CanvasTTY owns all Tool Use permissions, including commands, file edits, UI and delegation. "
+                           "Jev only selects the model and reasoning depth through the router. "
+                           "Use canvastty_agents for CanvasTTY workers. Do not invoke auxiliary model helpers "
+                           "to select or verify the current model; external route logs establish model identity.")
+        else:
+            notices.append(mode_notice + "Browser Use, Computer Use, and context compaction still use Jev.")
     try:
         installed_mode = json.loads((CODEX_HOME / "jev-harness/manifest.json").read_text(encoding="utf-8")).get("ladder_mode", "active")
     except (OSError, ValueError):
         installed_mode = None
-    if transition.get("omniroute") and installed_mode == "active":
+    if not native_owner and transition.get("omniroute") and installed_mode == "active":
         notices.append("For auxiliary model calls use local OmniRoute; guide: " + OMNIROUTE_GUIDE
                        + ". For public or explicitly authorized text files use " + OMNIROUTE_TEXT_HELPER
                        + ". This does not change the current Codex model; jev/auto already routes through OmniRoute.")
@@ -743,10 +773,17 @@ def ui_tool(name):
 
 def pre_tool(event):
     name = str(event.get("tool_name") or "")
+    native_owner = canvastty_session()
     auto_mode = jev_auto_model(event)
     log_metric("pre_tool_seen", tool=name[:100], model=clean(event.get("model"), 80),
-               guard_mode="jev_auto" if auto_mode else "manual",
+               guard_mode="canvastty" if native_owner else "jev_auto" if auto_mode else "manual",
                session=key_for(event.get("session_id")))
+    if native_owner:
+        # No allow verdict: CanvasTTY and Codex retain their complete decision
+        # chain, including denials and fail-closed handling in Auto and Bypass.
+        log_metric("native_tool_use", tool=name[:100], policy="canvastty",
+                   session=key_for(event.get("session_id")))
+        return None
     value = event.get("tool_input")
     value = value if isinstance(value, dict) else {}
     if not auto_mode:
@@ -933,7 +970,9 @@ def pre_compact(event):
     candidates = recent[-5:]
     keep = []
     usage = {}
-    if candidates:
+    if canvastty_session():
+        keep = candidates  # Bounded local carry; no second model judges the client context.
+    elif candidates:
         questions = {f"item_{i}": {"type": "choice",
             "instructions": f"Is state.candidates[{i}] essential after context compaction for the current user goal? Preserve uncertain facts.",
             "criteria": {"keep": "Important unresolved fact, file change, failure, or verification",

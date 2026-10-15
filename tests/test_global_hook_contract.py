@@ -26,8 +26,19 @@ def load_hook(codex_home, state_dir):
     return module
 
 
+CANVASTTY_ENV = {
+    "CANVASTTY_RUNTIME_PROVIDER": "codex",
+    "CANVASTTY_RUNTIME_ADDRESS": "/synthetic/runtime.sock",
+    "CANVASTTY_RUNTIME_TERMINAL_SESSION_ID": "12345678-1234-4567-8901-123456789abc",
+    "CANVASTTY_RUNTIME_CAPABILITY": "synthetic-capability-not-a-real-secret",
+}
+
+
 class GlobalHookContractTests(unittest.TestCase):
     def setUp(self):
+        env = mock.patch.dict(os.environ, {key: "" for key in CANVASTTY_ENV})
+        env.start()
+        self.addCleanup(env.stop)
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         root = Path(self.tmp.name)
@@ -40,6 +51,92 @@ class GlobalHookContractTests(unittest.TestCase):
     @staticmethod
     def decision(choice="deny", confidence=0.99):
         return {"answers": {"authorization": {"choice": choice, "confidence": confidence}}}
+
+    def test_native_launch_context_requires_all_fields_and_codex_identity(self):
+        with mock.patch.dict(os.environ, CANVASTTY_ENV):
+            self.assertTrue(self.hook.canvastty_session())
+            for key in CANVASTTY_ENV:
+                with self.subTest(missing=key), mock.patch.dict(os.environ, {key: " "}):
+                    self.assertFalse(self.hook.canvastty_session())
+            for key, value in [("CANVASTTY_RUNTIME_PROVIDER", "other-provider"),
+                               ("CANVASTTY_RUNTIME_TERMINAL_SESSION_ID", "invalid")]:
+                with self.subTest(field=key), mock.patch.dict(os.environ, {key: value}):
+                    self.assertFalse(self.hook.canvastty_session())
+
+    def test_native_tool_use_returns_no_verdict_and_preserves_arguments(self):
+        import copy
+        tools = [("Bash", {"command": "interpreter --evaluate synthetic-program"}),
+                 ("apply_patch", {"command": "synthetic patch"}),
+                 ("mcp__canvastty_agents__send_to_agent", {"sessionId": "owned-agent"}),
+                 ("mcp__browser__click", {"target": "synthetic button"}),
+                 ("mcp__other_service__write", {"path": "synthetic-target"}),
+                 ("new_tool", {"value": "synthetic-value"})]
+        for model in ["jev/auto", "manual-model", None]:
+            for name, value in tools:
+                with self.subTest(model=model, tool=name), \
+                     mock.patch.dict(os.environ, CANVASTTY_ENV), \
+                     mock.patch.object(self.hook, "ask_jev") as ask:
+                    event = {"session_id": "uncaptured-session", "model": model,
+                             "tool_name": name, "tool_input": value}
+                    original = copy.deepcopy(event)
+                    self.assertIsNone(self.hook.pre_tool(event))
+                    self.assertEqual(event, original)
+                    ask.assert_not_called()
+        rows = [json.loads(line) for line in (self.state / "usage.jsonl").read_text().splitlines()]
+        receipts = [row for row in rows if row["kind"] == "native_tool_use"]
+        self.assertEqual(len(receipts), len(tools) * 3)
+        self.assertTrue(all(row["policy"] == "canvastty" for row in receipts))
+        serialized = json.dumps(receipts)
+        for value in CANVASTTY_ENV.values():
+            self.assertNotIn(value, serialized)
+        self.assertNotIn("synthetic-program", serialized)
+        self.assertNotIn("permissionDecision", serialized)
+
+    def test_partial_launch_context_and_tool_arguments_do_not_disable_standalone_guard(self):
+        event = {"session_id": self.session, "model": "jev/auto", "tool_name": "Bash",
+                 "tool_input": {"command": "touch synthetic-output.txt", **CANVASTTY_ENV}}
+        for missing in CANVASTTY_ENV:
+            with self.subTest(missing=missing), \
+                 mock.patch.dict(os.environ, {**CANVASTTY_ENV, missing: ""}), \
+                 mock.patch.object(self.hook, "ask_jev", return_value=self.decision()) as ask:
+                result = self.hook.pre_tool(event)
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+                ask.assert_called_once()
+
+    def test_native_prompt_describes_owner_without_extra_model_calls_or_auxiliary_guide(self):
+        with mock.patch.dict(os.environ, CANVASTTY_ENV), \
+             mock.patch.object(self.hook, "ask_jev") as ask, \
+             mock.patch.object(self.hook, "skill_hint") as hint:
+            result = self.hook.prompt({"session_id": self.session, "model": "jev/auto",
+                                       "prompt": "Inspect the synthetic fixture"})
+        context = result["hookSpecificOutput"]["additionalContext"]
+        self.assertIn("CanvasTTY owns all Tool Use permissions", context)
+        self.assertIn("Jev only selects the model", context)
+        self.assertNotIn(self.hook.OMNIROUTE_TEXT_HELPER, context)
+        self.assertNotIn(self.hook.OMNIROUTE_GUIDE, context)
+        ask.assert_not_called()
+        hint.assert_not_called()
+
+    def test_owner_transition_replaces_previous_tool_review_notice(self):
+        self.hook.update_state(self.session, lambda saved: saved.update(
+            permission_owner="jev", tool_mode="jev_auto"))
+        with mock.patch.dict(os.environ, CANVASTTY_ENV):
+            result = self.hook.prompt({"session_id": self.session, "model": "jev/auto",
+                                       "prompt": "Continue"})
+        self.assertIn("CanvasTTY owns", result["hookSpecificOutput"]["additionalContext"])
+        self.assertEqual(self.hook._read(self.hook.state_file(self.session))["permission_owner"], "canvastty")
+
+    def test_native_compaction_keeps_bounded_local_carry_without_a_model_judge(self):
+        recent = ["Changed synthetic file", "Unresolved synthetic failure"]
+        self.hook.update_state(self.session, lambda saved: saved.update(recent=recent))
+        with mock.patch.dict(os.environ, CANVASTTY_ENV), \
+             mock.patch.object(self.hook, "ask_jev") as ask:
+            self.assertIsNone(self.hook.pre_compact({"session_id": self.session, "trigger": "test"}))
+        carry = self.hook._read(self.hook.state_file(self.session))["carry"]
+        self.assertLessEqual(len(carry), 900)
+        for item in recent:
+            self.assertIn(item, carry)
+        ask.assert_not_called()
 
     def test_manual_model_does_not_call_jev_for_ordinary_tool_use(self):
         event = {"session_id": self.session, "model": "gpt-6-sol", "tool_name": "Bash",
