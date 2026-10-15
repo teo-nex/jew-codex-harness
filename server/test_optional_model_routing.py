@@ -70,10 +70,15 @@ class ClientVersionPropagation(unittest.TestCase):
         with mock.patch.object(jev, 'installed_codex_version', return_value='1.2.3') as detect:
             for headers in ({'Version': '2.3.4'}, {'version': '2.3.4'},
                             {'User-Agent': 'codex_cli_rs/2.3.4 (fixture)'},
+                            {'User-Agent': 'codex-cli/2.3.4'},
                             {'user-agent': 'codex_exec/2.3.4 (fixture)'}):
                 self.assertEqual(jev.codex_client_version(headers), '2.3.4')
             detect.assert_not_called()
-            for headers in ({}, {'Version': 'bad\r\nHeader: value'}, {'User-Agent': 'other-client/9.9.9'}):
+            for headers in ({}, {'Version': 'bad\r\nHeader: value'},
+                            {'User-Agent': 'other-client/9.9.9'},
+                            {'User-Agent': 'codex-router/9.8.7'},
+                            {'User-Agent': 'codex-proxy/9.8.7'},
+                            {'User-Agent': 'not-codex_exec/9.8.7'}):
                 self.assertEqual(jev.codex_client_version(headers), '1.2.3')
 
     def test_installed_version_is_detected_once_and_never_guessed_on_failure(self):
@@ -105,7 +110,7 @@ class ClientVersionPropagation(unittest.TestCase):
             def close(self): pass
         handler = object.__new__(jev.Handler)
         handler._attempts = []; handler._response_started = False
-        handler.wfile = io.BytesIO(); handler.headers = {}
+        handler.wfile = io.BytesIO(); handler.headers = {'User-Agent': 'codex-router/9.8.7'}
         handler.send_response = lambda *args: None
         handler.send_header = lambda *args: None
         handler.end_headers = lambda: None

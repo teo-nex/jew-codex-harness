@@ -471,7 +471,8 @@ def codex_client_version(headers=None):
     version = headers.get("version", "")
     if len(version) <= 32 and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
         return version
-    match = re.search(r"(?:codex[-_][A-Za-z0-9_]*|codex-cli)/(\d+\.\d+\.\d+)",
+    # Proxy product versions (for example codex-router) are not CLI versions.
+    match = re.search(r"(?:^|\s)(?:codex_cli_rs|codex_exec|codex-cli)/(\d+\.\d+\.\d+)(?=\s|$)",
                       headers.get("user-agent", ""))
     return match[1] if match else installed_codex_version()
 
