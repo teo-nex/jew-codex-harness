@@ -117,6 +117,8 @@ class GlobalHookContractTests(unittest.TestCase):
         self.assertIn("Jev only selects the model", context)
         self.assertIn("discover missing tools once", context)
         self.assertIn("no duplicate get_agent_result", context)
+        self.assertIn("session IDs belong only to canvastty_agents", context)
+        self.assertIn("cancel_agent once; do not interrupt", context)
         self.assertIn("Do not read the standalone", context)
         self.assertNotIn(self.hook.OMNIROUTE_TEXT_HELPER, context)
         self.assertNotIn(self.hook.OMNIROUTE_GUIDE, context)
@@ -133,7 +135,7 @@ class GlobalHookContractTests(unittest.TestCase):
         self.assertEqual(self.hook._read(self.hook.state_file(self.session))["permission_owner"], "canvastty")
 
     def test_existing_native_session_receives_updated_workflow_once(self):
-        self.hook.update_state(self.session, lambda saved: saved.update(permission_owner="canvastty", tool_mode="jev_auto"))
+        self.hook.update_state(self.session, lambda saved: saved.update(permission_owner="canvastty", tool_mode="jev_auto", canvastty_workflow_version=2))
         with mock.patch.dict(os.environ, CANVASTTY_ENV):
             first = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})
             second = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})

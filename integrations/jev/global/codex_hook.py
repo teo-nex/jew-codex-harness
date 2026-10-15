@@ -400,8 +400,8 @@ def prompt(event):
         if value.get("permission_owner") != owner:
             value["permission_owner"] = owner
             transition["changed"] = True
-        if native_owner and value.get("canvastty_workflow_version") != 2:
-            value["canvastty_workflow_version"] = 2
+        if native_owner and value.get("canvastty_workflow_version") != 3:
+            value["canvastty_workflow_version"] = 3
             transition["changed"] = True
         if mode and value.get("tool_mode") != mode:
             value["tool_mode"] = mode
@@ -428,7 +428,9 @@ def prompt(event):
                            "to select or verify the current model; external route logs establish model identity. "
                            "Call available tools directly, discover missing tools once, and create independent workers in parallel. "
                            "A completed wait_for_agent answer needs no duplicate get_agent_result. "
-                           "Do not read the standalone jev-worker-orchestration skill for ordinary CanvasTTY delegation.")
+                           "Do not read the standalone jev-worker-orchestration skill for ordinary CanvasTTY delegation. "
+                           "CanvasTTY session IDs belong only to canvastty_agents, never built-in Codex agent controls. "
+                           "Close completed children with canvastty_agents.cancel_agent once; do not interrupt them first.")
         else:
             notices.append(mode_notice + "Browser Use, Computer Use, and context compaction still use Jev.")
     try:
