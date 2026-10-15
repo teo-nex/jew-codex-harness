@@ -25,21 +25,17 @@ A successful source test does not prove fresh-client hook trust or model quality
 ## CanvasTTY native orchestration with jev/auto
 
 CanvasTTY Orchestrator sessions use their own `canvastty_agents` MCP server.
-The global hook delegates the known native operations (`list_providers`,
-`list_agents`, `observe_agent`, `wait_for_agent`, `get_agent_result`, `spawn_agent`,
-`send_to_agent`, `cancel_agent`) to CanvasTTY's permission checks without a second
-Jev authorization decision. CanvasTTY validates the caller, child ownership,
-project directory, profile ceiling, isolation and launch options. Arguments pass
-through unchanged. Unknown tools retain the default policy; the namespace is
-not a blanket exemption. Built-in agent spawning and nested `codex exec` remain
-blocked in autorouting mode.
+In sessions with complete inherited CanvasTTY runtime metadata, the global hook
+returns no permission verdict for any tool. CanvasTTY validates caller identity,
+child ownership, project directory, profile ceiling, isolation and launch options;
+its own hooks continue to enforce tool permissions in Auto and Bypass. Arguments
+pass through unchanged. Jev selects only models and reasoning depth. Outside
+CanvasTTY, existing Jev guards remain unchanged; an MCP tool name alone does not
+select the CanvasTTY permission policy.
 
-Model selection is independent of this permission policy. Select `jev/auto`
-for each child that should route through Jev and start CanvasTTY with the intended
-`CODEX_HOME`. A Codex child using `jev/auto` retains Jev checks for its own tools;
-a manually selected model keeps ordinary client permissions. An external route
-must also support the client's tool search history as described in
-[provider configuration](PROVIDERS.md).
+Select `jev/auto` for each child that should route through Jev and start CanvasTTY
+with the intended `CODEX_HOME`. An external route must also support the client's
+tool search history as described in [provider configuration](PROVIDERS.md).
 
 Native orchestration does not add the `jev-workers` manifest, file allowlist or
 acceptance and transfer workflow. Use `jev-workers` when that workflow is needed.

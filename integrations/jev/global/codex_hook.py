@@ -63,11 +63,6 @@ FOLLOWUP = re.compile(
     r"\bпродолж\w*\b|\b(?:с\s+этим\s+токеном|в\s+этой\s+переписке|по\s+этой\s+задаче)\b)"
 )
 NATIVE_SPAWN = re.compile(r"(?:^|[._])spawn_agent$", re.I)
-CANVASTTY_AGENTS_PREFIX = "mcp__canvastty_agents__"
-CANVASTTY_AGENT_TOOLS = frozenset({
-    "list_providers", "list_agents", "observe_agent", "wait_for_agent", "get_agent_result",
-    "spawn_agent", "send_to_agent", "cancel_agent",
-})
 SHELL_CODEX_EXEC = re.compile(r"(?i)(?:^|[;&|]\s*)(?:\S*/)?codex\s+exec\b")
 SHELL_WORKER_BYPASS = re.compile(r"(?i)\b(?:npx\s+jev[-_]workers|jev[-_]workers\s+(?:execute|submit|status)|python3?\s+-m\s+jev_workers)\b")
 SKILL_ALIASES = {
@@ -408,7 +403,7 @@ def prompt(event):
         if mode and value.get("tool_mode") != mode:
             value["tool_mode"] = mode
             transition["changed"] = True
-        if value.get("omniroute_guide_version") != 1:
+        if not native_owner and value.get("omniroute_guide_version") != 1:
             value["omniroute_guide_version"] = 1
             transition["omniroute"] = True
     update_state(session, edit)
@@ -420,7 +415,7 @@ def prompt(event):
             pass
     notices = []
     if transition.get("changed"):
-        mode_notice = ("Active model is jev/auto: Jev reviews ordinary Tool Use; use jev-workers or CanvasTTY canvastty_agents for subagents. CanvasTTY owns native orchestration permissions. "
+        mode_notice = ("Active model is jev/auto: Jev reviews ordinary Tool Use; use jev-workers for subagents. "
                        if mode == "jev_auto" else
                        "Active model was selected manually: ordinary Tool Use and delegation are not vetoed by Jev. ")
         if native_owner:
@@ -796,16 +791,8 @@ def pre_tool(event):
             return None  # The safe helper makes its own Jev decision.
         if not ui_tool(name):
             return None  # Manually selected models own ordinary Tool Use.
-    if (name.startswith(CANVASTTY_AGENTS_PREFIX)
-            and name.removeprefix(CANVASTTY_AGENTS_PREFIX) in CANVASTTY_AGENT_TOOLS):
-        # The native MCP validates the caller, owned session, project folder,
-        # profile ceiling and all launch options. Leave its arguments unchanged.
-        # This does not exempt tools executed inside the child from Jev review.
-        log_metric("native_orchestration", tool=name[:100], policy="canvastty",
-                   session=key_for(event.get("session_id")))
-        return None
     if NATIVE_SPAWN.search(name):
-        return deny("Create subagents through jev-workers or CanvasTTY canvastty_agents MCP tools.")
+        return deny("Create subagents only through jev-workers.execute or jev-workers.submit.")
     if name in ("tool_search", "tools_search"):
         return None
     if name.startswith("mcp__jev_workers__"):
@@ -887,7 +874,7 @@ def pre_tool(event):
     if name == "Bash":
         command = str(value.get("command") or value.get("cmd") or "")
         if SHELL_CODEX_EXEC.search(command):
-            return deny("Start subagents through jev-workers or CanvasTTY canvastty_agents MCP, not a nested codex exec.")
+            return deny("Start subagents through jev-workers MCP, not a nested codex exec.")
         if SHELL_WORKER_BYPASS.search(command):
             return deny("Use the jev-workers MCP tool; do not invoke a shell package or module.")
         if HARD_DENY.search(command):
