@@ -58,6 +58,37 @@ class ReplayPolicy(unittest.TestCase):
             self.assertEqual(data["scenarios_usd"][routing_policy.SOL], 2.0)
             self.assertEqual(data["policy_version"], routing_policy.POLICY_VERSION)
 
+    def test_backtest_prices_every_policy_choice_including_cache_counters(self):
+        tokens = {"input_tokens": 1_000_000, "cached_input_tokens": 500_000,
+                  "cache_write_input_tokens": 100_000, "output_tokens": 100_000}
+        for model in routing_policy.TIERS:
+            with self.subTest(model=model):
+                self.assertGreater(backtest.cost(model, tokens), 0)
+        self.assertAlmostEqual(backtest.cost(routing_policy.SOL61, tokens), 2.1)
+
+    def test_optional_model_sessions_and_decisions_are_not_silently_skipped(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            self.write_session(root, "current", routing_policy.SOL61, 1_000_000)
+            self.write_session(root, "previous", routing_policy.SOL, 1_000_000)
+            result = root / "result.json"
+            pair = routing_policy.route_choice(routing_policy.SOL61, "medium")
+            answers = {key: {"choice": value, "confidence": 0.95} for key, value in pair.items()}
+            with mock.patch.object(backtest, "SESS_ROOT", str(root)), \
+                 mock.patch.object(backtest, "RESULT_PATH", str(result)), \
+                 mock.patch.object(backtest.poc, "load_key", return_value="fixture"), \
+                 mock.patch.object(backtest.poc, "post_json", return_value={"answers": answers}), \
+                 mock.patch("sys.argv", ["backtest"]), contextlib.redirect_stdout(io.StringIO()):
+                self.assertEqual(backtest.main(), 0)
+            data = json.loads(result.read_text())
+            self.assertEqual(data["turns"], 2)
+            self.assertEqual(data["skipped_turns"], 0)
+            self.assertEqual(data["actual_models"], {routing_policy.SOL61: 1, routing_policy.SOL: 1})
+            self.assertEqual(data["actual_usd"], 4.0)
+            self.assertEqual(data["jev_usd"], 4.0)
+            self.assertEqual(data["routes"][routing_policy.SOL61]["turns"], 2)
+            self.assertEqual(data["scenarios_usd"][routing_policy.SOL61], 4.0)
+
     def test_identical_short_replies_do_not_share_different_contexts(self):
         self.assertNotEqual(backtest.turn_key({"text": "continue", "prev": "first task"}),
                             backtest.turn_key({"text": "continue", "prev": "other task"}))
