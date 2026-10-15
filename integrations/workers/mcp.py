@@ -2,6 +2,8 @@
 """Owned Codex workers: one MCP creation path, jev/auto provider ladder."""
 import json
 import math
+import os
+import uuid
 import sys
 import time
 
@@ -21,7 +23,7 @@ TASK_SCHEMA = {"type": "object", "required": ["request_id", "goal", "cwd", "allo
                          "items": {"type": "string", "enum": ["browser", "computer", "pdf", "documents"]}}}}
 WAIT = {"type": "number", "minimum": 0, "maximum": 50}
 TOOLS = [
-    {"name": "submit", "description": "Start one owned Codex worker on jev/auto. Jev applies Plus, sticky Gemini, Opus, Gonka GLM, Gonka DeepSeek, Wally GLM, then Luna 6.",
+    {"name": "submit", "description": "Start one owned Codex worker on jev/auto. Uses the configured provider sequence; outside CanvasTTY only.",
      "inputSchema": TASK_SCHEMA},
     {"name": "execute", "description": "Start an owned jev/auto worker and wait up to 50 seconds in code; use collect for longer tasks.",
      "inputSchema": {**TASK_SCHEMA, "properties": {**TASK_SCHEMA["properties"], "wait_seconds": WAIT}}},
@@ -48,6 +50,20 @@ def wait_for(task_id, seconds, get_status, active):
     return current
 
 
+def canvas_owned():
+    """Availability hint only; native CanvasTTY independently owns permissions."""
+    if os.environ.get("CANVASTTY_RUNTIME_PROVIDER") != "codex":
+        return False
+    if not all(os.environ.get(key, "").strip() for key in (
+        "CANVASTTY_RUNTIME_ADDRESS", "CANVASTTY_RUNTIME_TERMINAL_SESSION_ID", "CANVASTTY_RUNTIME_CAPABILITY")):
+        return False
+    try:
+        uuid.UUID(os.environ["CANVASTTY_RUNTIME_TERMINAL_SESSION_ID"])
+    except ValueError:
+        return False
+    return True
+
+
 def handle(message):
     if not isinstance(message, dict):
         raise ValueError("JSON-RPC message must be an object")
@@ -58,8 +74,10 @@ def handle(message):
     if method == "ping":
         return {}
     if method == "tools/list":
-        return {"tools": TOOLS}
+        return {"tools": [] if canvas_owned() else TOOLS}
     if method == "tools/call":
+        if canvas_owned():
+            return {"content": [{"type": "text", "text": "Use CanvasTTY canvastty_agents for this session; standalone jev-workers are unavailable here."}], "isError": True}
         params = message.get("params", {})
         name = params.get("name")
         arguments = params.get("arguments", {})

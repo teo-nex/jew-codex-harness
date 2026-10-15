@@ -115,6 +115,9 @@ class GlobalHookContractTests(unittest.TestCase):
         context = result["hookSpecificOutput"]["additionalContext"]
         self.assertIn("CanvasTTY owns all Tool Use permissions", context)
         self.assertIn("Jev only selects the model", context)
+        self.assertIn("discover missing tools once", context)
+        self.assertIn("no duplicate get_agent_result", context)
+        self.assertIn("Do not read the standalone", context)
         self.assertNotIn(self.hook.OMNIROUTE_TEXT_HELPER, context)
         self.assertNotIn(self.hook.OMNIROUTE_GUIDE, context)
         ask.assert_not_called()
@@ -128,6 +131,14 @@ class GlobalHookContractTests(unittest.TestCase):
                                        "prompt": "Continue"})
         self.assertIn("CanvasTTY owns", result["hookSpecificOutput"]["additionalContext"])
         self.assertEqual(self.hook._read(self.hook.state_file(self.session))["permission_owner"], "canvastty")
+
+    def test_existing_native_session_receives_updated_workflow_once(self):
+        self.hook.update_state(self.session, lambda saved: saved.update(permission_owner="canvastty", tool_mode="jev_auto"))
+        with mock.patch.dict(os.environ, CANVASTTY_ENV):
+            first = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})
+            second = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})
+        self.assertIn("discover missing tools once", first["hookSpecificOutput"]["additionalContext"])
+        self.assertIsNone(second)
 
     def test_native_prompt_does_not_consume_the_standalone_auxiliary_notice(self):
         with mock.patch.dict(os.environ, CANVASTTY_ENV):
