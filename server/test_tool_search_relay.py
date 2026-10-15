@@ -65,6 +65,27 @@ class ToolSearchPayloadTests(unittest.TestCase):
                     external_tool_search_payload(payload)
                 self.assertEqual(payload, original)
 
+    def test_discovered_and_namespaced_function_collisions_fail_without_mutation(self):
+        for definition in ({"type": "function", "name": "tool_search"},
+                           {"type": "function", "function": {"name": "tool_search"}},
+                           {"type": "namespace", "name": "ordinary", "tools": [{"type": "function", "name": "tool_search"}]}):
+            for history in (True, False):
+                with self.subTest(definition=definition, history=history):
+                    payload = {"tools": [{"type": "tool_search", "execution": "client"}], "input": []}
+                    if history:
+                        payload["input"].append({"type": "tool_search_output", "execution": "client", "tools": [definition]})
+                    else:
+                        payload["tools"].append(definition)
+                    original = copy.deepcopy(payload)
+                    with self.assertRaisesRegex(ValueError, "Ambiguous"):
+                        external_tool_search_payload(payload)
+                    self.assertEqual(payload, original)
+        payload = {"tools": [{"type": "tool_search", "execution": "client"}],
+                   "input": [{"type": "tool_search_output", "tools": [{"type": "function", "name": "ordinary_tool"}]}]}
+        original = copy.deepcopy(payload)
+        self.assertEqual(external_tool_search_payload(payload)["tools"][0]["type"], "function")
+        self.assertEqual(payload, original)
+
 
 class ToolSearchRelayTests(unittest.TestCase):
     def test_function_call_becomes_native_tool_search_call(self):

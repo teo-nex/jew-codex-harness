@@ -6,6 +6,7 @@ import os
 import shutil
 from pathlib import Path
 import subprocess
+import sys
 import tempfile
 import unittest
 from unittest import mock
@@ -128,6 +129,40 @@ class ClientVersionPropagation(unittest.TestCase):
                     result = subprocess.run([node, str(helper)], env={**env, **overrides},
                                             capture_output=True, text=True, timeout=15, check=True)
                     self.assertEqual(result.stdout.strip(), "codex-cli " + expected)
+
+    @unittest.skipUnless(sys.platform == "darwin", "known macOS service CLI paths")
+    def test_service_path_prefers_known_terminal_cli_over_older_desktop_bundle(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        with tempfile.TemporaryDirectory() as directory:
+            preload = Path(directory) / "resolver-fixture.mjs"
+            preload.write_text("""
+import fs from 'node:fs';
+import cp from 'node:child_process';
+import {syncBuiltinESMExports} from 'node:module';
+const originalExists=fs.existsSync;
+const selected=process.env.TEST_TERMINAL_CLI;
+const desktop='/Applications/Codex.app/Contents/Resources/codex';
+fs.existsSync=(file)=>String(file).endsWith('/codex')
+  ? file===selected || file===desktop : originalExists(file);
+cp.execFileSync=(file)=>{
+  if(file===selected)return 'codex-cli 7.8.9';
+  if(file===desktop)return 'codex-cli 1.2.3';
+  throw new Error('No fixture command on PATH');
+};
+syncBuiltinESMExports();
+""")
+            env = dict(os.environ)
+            env.pop("CODEX_BIN", None); env.pop("CODEX_INSTALL_DIR", None)
+            env["PATH"] = directory
+            for selected in ("/opt/homebrew/bin/codex", "/usr/local/bin/codex"):
+                with self.subTest(selected=selected):
+                    result = subprocess.run([node, "--import", str(preload),
+                                            str(Path(__file__).with_name("codex_client_version.mjs"))],
+                                           env={**env, "TEST_TERMINAL_CLI": selected},
+                                           capture_output=True, text=True, timeout=15, check=True)
+                    self.assertEqual(result.stdout.strip(), "codex-cli 7.8.9")
 
     def test_external_forward_sends_detected_version_without_changing_payload(self):
         sent = []

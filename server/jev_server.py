@@ -1474,6 +1474,20 @@ def has_tool_search_history(payload):
     )
 
 
+def _tool_search_name_collision(tools):
+    pending = list(tools)
+    while pending:
+        tool = pending.pop()
+        if not isinstance(tool, dict):
+            continue
+        if (tool.get("name") == "tool_search" or isinstance(tool.get("function"), dict)
+                and tool["function"].get("name") == "tool_search"):
+            return True
+        if isinstance(tool.get("tools"), list):
+            pending.extend(tool["tools"])
+    return False
+
+
 def external_tool_search_payload(payload):
     """Use a function wire declaration for client discovery on external routes.
 
@@ -1487,11 +1501,11 @@ def external_tool_search_payload(payload):
                  and tool.get("type") == "tool_search" and tool.get("execution") == "client"]
     if not discovery:
         return payload
-    if len(discovery) != 1 or any(
-        isinstance(tool, dict) and (tool.get("name") == "tool_search"
-            or isinstance(tool.get("function"), dict) and tool["function"].get("name") == "tool_search")
-        for tool in tools
-    ):
+    definitions = list(tools)
+    for item in payload.get("input", []) if isinstance(payload.get("input"), list) else []:
+        if isinstance(item, dict) and item.get("type") == "tool_search_output" and isinstance(item.get("tools"), list):
+            definitions.extend(item["tools"])
+    if len(discovery) != 1 or _tool_search_name_collision(definitions):
         raise ValueError("Ambiguous client discovery tool name")
     native = discovery[0]
     function = {"type": "function", "name": "tool_search"}

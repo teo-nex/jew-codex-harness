@@ -10,10 +10,11 @@ import { commandOnPath } from "../router/src/spawnable-command.mjs";
 const installed = process.env.CODEX_INSTALL_DIR
   ? path.join(process.env.CODEX_INSTALL_DIR, process.platform === "win32" ? "codex.exe" : "codex")
   : undefined;
-const localBin = path.join(os.homedir(), ".local", "bin");
+const terminalBins = [path.join(os.homedir(), ".local", "bin"),
+  ...(process.platform === "win32" ? [] : ["/opt/homebrew/bin", "/usr/local/bin"])];
 const candidate = [process.env.CODEX_BIN, installed, commandOnPath("codex"),
   process.platform !== "win32" ? resolveRealCodex()?.file : undefined,
-  ...codexCandidatePaths().filter((file) => path.dirname(file) === localBin)]
+  ...terminalBins.flatMap((directory) => codexCandidatePaths().filter((file) => path.dirname(file) === directory))]
   .find((file) => file && existsSync(file) && !isShimFile(file));
 if (candidate) process.env.CODEX_BIN = candidate;
 process.stdout.write(codexVersion() || "");
