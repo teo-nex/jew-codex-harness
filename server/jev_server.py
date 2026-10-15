@@ -2924,6 +2924,12 @@ class Handler(BaseHTTPRequestHandler):
                         attempt["usage"] = usage_counts(assembled.get("usage"))
                         if assembled.get("status") in ("completed", "incomplete", "failed"):
                             attempt["terminal_type"] = "response." + assembled["status"]
+                if status == 200 and tool_search_relay and isinstance(assembled, dict):
+                    restored = False
+                    for item in assembled.get("output") or []:
+                        restored = SummaryMarker._restore_tool_search_item(item, True) or restored
+                    if restored:
+                        data = json.dumps(assembled).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", out_ctype)
                 self.send_header("Content-Length", str(len(data)))

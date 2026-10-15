@@ -1,7 +1,12 @@
 """External Responses must preserve Codex's client-executed tool discovery."""
 
+import copy
+import io
 import json
 import unittest
+from unittest import mock
+
+import jev_server as jev
 
 from jev_server import SummaryMarker, external_tool_search_payload
 
@@ -86,6 +91,56 @@ class ToolSearchRelayTests(unittest.TestCase):
         self.assertEqual(done["arguments"], {"query": "jev-workers status"})
         self.assertEqual(terminal["arguments"], done["arguments"])
         self.assertEqual(marker.terminal_type, "response.completed")
+
+
+class NonStreamDiscoveryTests(unittest.TestCase):
+    def test_nonstream_json_and_sse_restore_only_external_client_discovery(self):
+        for transport in ("application/json", "text/event-stream"):
+            for external, discovery in ((True, True), (True, False), (False, True)):
+                with self.subTest(transport=transport, external=external, discovery=discovery):
+                    call = {"id": "fc_fixture", "type": "function_call", "name": "tool_search",
+                            "call_id": "call_fixture", "arguments": '{"query":"fixture"}'}
+                    ordinary = {**call, "id": "fc_other", "name": "ordinary_tool", "call_id": "call_other"}
+                    response = {"id": "resp_fixture", "status": "completed", "output": [call, ordinary]}
+                    raw = (json.dumps(response) if transport == "application/json" else
+                           event("response.completed", response=response)).encode()
+                    payload = {"model": "fixture/model", "stream": False, "input": "fixture",
+                               "tools": [{"type": "tool_search", "execution": "client"}] if discovery else
+                                        [{"type": "function", "name": "tool_search"}]}
+                    original = copy.deepcopy(payload)
+                    upstream = mock.Mock(spec=["status", "headers", "getheader", "read"],
+                                         status=200, headers={})
+                    upstream.getheader.return_value = transport
+                    upstream.read.return_value = raw
+                    connection = mock.Mock()
+                    connection.getresponse.return_value = upstream
+                    handler = jev.Handler.__new__(jev.Handler)
+                    handler._attempts = []; handler._response_started = False
+                    handler.wfile = io.BytesIO(); handler.headers = {}
+                    handler.send_response = lambda *args: None
+                    handler.send_header = lambda *args: None
+                    handler.end_headers = lambda: None
+                    route = {"host": "fixture", "port": 1, "key": "synthetic"} if external else None
+                    with mock.patch.object(jev.http.client, "HTTPConnection", return_value=connection), \
+                         mock.patch.object(jev, "codex_client_version", return_value="1.2.3"), \
+                         mock.patch.object(jev, "caller_secret", return_value="synthetic"):
+                        result = handler._forward(payload, "/v1/responses", False, False, "",
+                                                  "fixture/model", external=route)
+                    self.assertEqual(result[0], 200)
+                    returned = json.loads(handler.wfile.getvalue())
+                    item = returned["output"][0]
+                    if external and discovery:
+                        self.assertEqual(item["type"], "tool_search_call")
+                        self.assertEqual(item["execution"], "client")
+                        self.assertEqual(item["arguments"], {"query": "fixture"})
+                        self.assertEqual(item["status"], "completed")
+                        self.assertEqual(item["id"], "tsc_fc_fixture")
+                        self.assertEqual(item["call_id"], call["call_id"])
+                        self.assertNotIn("name", item)
+                    else:
+                        self.assertEqual(item, call)
+                    self.assertEqual(returned["output"][1], ordinary)
+                    self.assertEqual(payload, original)
 
 
 if __name__ == "__main__":

@@ -2,6 +2,8 @@
 import copy
 import io
 import json
+import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -94,6 +96,38 @@ class ClientVersionPropagation(unittest.TestCase):
                 self.assertEqual(run.call_count, 1)
                 self.assertIn('codex_client_version.mjs', run.call_args.args[0][-1])
                 self.assertNotIn('shell', run.call_args.kwargs)
+
+    @unittest.skipIf(os.name == "nt", "router PATH shims are POSIX-only")
+    def test_version_detection_walks_past_router_shims_and_preserves_overrides(self):
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("Node.js unavailable")
+        helper = Path(__file__).with_name("codex_client_version.mjs")
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            def executable(folder, version, shim=False):
+                file = root / folder / "codex"
+                file.parent.mkdir()
+                file.write_text("#!/bin/sh\n" + ("# MODEL_ROUTER_CODEX_SHIM\nexit 99\n" if shim else
+                                'printf "codex-cli ' + version + '\\n"\n'))
+                file.chmod(0o700)
+                return file
+            shim = executable("shim", "", True)
+            second_shim = executable("second-shim", "", True)
+            real = executable("real", "7.8.9")
+            later = executable("later", "8.9.0")
+            explicit = executable("explicit", "9.0.1")
+            env = dict(os.environ)
+            env.pop("CODEX_BIN", None); env.pop("CODEX_INSTALL_DIR", None)
+            env["PATH"] = os.pathsep.join([str(p.parent) for p in (shim, second_shim, real, later)]
+                                         + [env.get("PATH", "")])
+            for overrides, expected in (({}, "7.8.9"), ({"CODEX_BIN": str(explicit)}, "9.0.1"),
+                                        ({"CODEX_INSTALL_DIR": str(explicit.parent)}, "9.0.1"),
+                                        ({"CODEX_BIN": str(shim)}, "7.8.9")):
+                with self.subTest(overrides=overrides):
+                    result = subprocess.run([node, str(helper)], env={**env, **overrides},
+                                            capture_output=True, text=True, timeout=15, check=True)
+                    self.assertEqual(result.stdout.strip(), "codex-cli " + expected)
 
     def test_external_forward_sends_detected_version_without_changing_payload(self):
         sent = []
