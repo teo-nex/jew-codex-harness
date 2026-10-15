@@ -34,6 +34,20 @@ class ToolSearchPayloadTests(unittest.TestCase):
                 self.assertIs(wire["tools"][1], payload["tools"][1])
                 self.assertEqual(wire["tool_choice"], {"type": "function", "name": "tool_search"})
 
+    def test_allowed_discovery_choices_match_rewritten_declarations_without_mutation(self):
+        for mode in ("auto", "required"):
+            for reference in ({"type": "tool_search"}, {"type": "tool_search", "execution": "client"}):
+                with self.subTest(mode=mode, reference=reference):
+                    other = {"type": "function", "name": "ordinary_tool"}
+                    payload = {"tools": [{"type": "tool_search", "execution": "client"}],
+                               "tool_choice": {"type": "allowed_tools", "mode": mode, "tools": [other, reference]}}
+                    original = copy.deepcopy(payload)
+                    routed = external_tool_search_payload(payload)
+                    self.assertEqual(payload, original)
+                    self.assertEqual(routed["tool_choice"], {"type": "allowed_tools", "mode": mode,
+                                     "tools": [other, {"type": "function", "name": "tool_search"}]})
+                    self.assertIs(routed["tool_choice"]["tools"][0], other)
+
     def test_unrelated_and_server_executed_tools_are_unchanged(self):
         for tools in (None, [], [{"type": "function", "name": "tool_search"}],
                       [{"type": "tool_search", "execution": "server"}], [{"type": "web_search"}]):

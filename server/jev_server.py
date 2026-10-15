@@ -1500,6 +1500,13 @@ def external_tool_search_payload(payload):
     choice = payload.get("tool_choice")
     if isinstance(choice, dict) and choice.get("type") == "tool_search":
         routed["tool_choice"] = {"type": "function", "name": "tool_search"}
+    elif isinstance(choice, dict) and choice.get("type") == "allowed_tools" and isinstance(choice.get("tools"), list):
+        routed["tool_choice"] = {**choice, "tools": [
+            {"type": "function", "name": "tool_search"}
+            if isinstance(tool, dict) and tool.get("type") == "tool_search"
+            and tool.get("execution") in (None, "client") else tool
+            for tool in choice["tools"]
+        ]}
     return routed
 
 
