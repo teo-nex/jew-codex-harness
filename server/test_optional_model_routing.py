@@ -74,6 +74,42 @@ class OptionalModelRouting(unittest.TestCase):
             self.assertEqual(handler._serve_ladder.call_args.args[2:4], (expected, "medium"))
             self.assertEqual(handler._serve_ladder.call_args.kwargs["routing_gate"], "jev_error:TimeoutError")
 
+    def test_explicit_models_use_the_ladder_without_classification_or_a_cache_key(self):
+        for requested in (SOL61, "gpt-6-sol", ASTRA):
+            config = {"providers": [{"id": "gateway", "models": {m: "gateway/" + m for m in NATIVE_MODELS}}]}
+            handler = object.__new__(jev.Handler)
+            handler.path = "/v1/responses"
+            handler._body = lambda _: {"model": requested, "input": "bounded fixture", "reasoning": {"effort": "low"}}
+            handler._serve_ladder = mock.Mock()
+            with mock.patch.dict(os.environ, {"JEV_LADDER_MODE": "active"}), \
+                 mock.patch.object(jev, "_provider_ladder", return_value=Ladder(config, self.state)), \
+                 mock.patch.object(jev, "route_lease", return_value={"model": "gpt-6-luna"}), \
+                 mock.patch.object(jev.os.path, "exists", return_value=False), \
+                 mock.patch.object(jev, "call_jev_routed") as classify:
+                handler._post()
+            classify.assert_not_called()
+            self.assertEqual(handler._serve_ladder.call_args.args[2:4], (requested, "low"))
+            self.assertEqual(handler._serve_ladder.call_args.args[-1], "manual")
+            self.assertEqual(handler._serve_ladder.call_args.kwargs["routing_gate"], "manual")
+
+    def test_unmapped_fixed_models_and_invalid_effort_fail_without_substitution(self):
+        for requested, effort in ((SOL61, "low"), ("gpt-6-sol", "invalid")):
+            config = {"providers": [{"id": "gateway", "models": {m: "gateway/" + m for m in REQUIRED_NATIVE_MODELS}}]}
+            handler = object.__new__(jev.Handler)
+            handler.path = "/v1/responses"
+            handler._body = lambda _: {"model": requested, "input": "fixture", "reasoning": {"effort": effort}}
+            handler._serve_ladder = mock.Mock()
+            handler._json = mock.Mock()
+            with mock.patch.dict(os.environ, {"JEV_LADDER_MODE": "active"}), \
+                 mock.patch.object(jev, "_provider_ladder", return_value=Ladder(config, self.state)), \
+                 mock.patch.object(jev, "route_lease", return_value=None), \
+                 mock.patch.object(jev.os.path, "exists", return_value=False), \
+                 mock.patch.object(jev, "call_jev_routed") as classify:
+                handler._post()
+            self.assertEqual(handler._json.call_args.args[0], 400)
+            handler._serve_ladder.assert_not_called()
+            classify.assert_not_called()
+
     def test_choice_distribution_is_validated_against_the_offered_set(self):
         original = copy.deepcopy(QUESTIONS)
         for models in (REQUIRED_NATIVE_MODELS, NATIVE_MODELS):

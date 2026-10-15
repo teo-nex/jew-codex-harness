@@ -3,6 +3,7 @@
 
 - `jev/auto` selects the provider and reasoning depth. Outside CanvasTTY, use `jev-workers` only for independent, bounded tasks with a checkable result. Keep one worker conversation through provider fallbacks.
 - In a session launched by CanvasTTY, CanvasTTY owns permissions for all tools, commands, file edits, UI and delegation in every profile, including Auto and Bypass. Jev only selects models and reasoning depth. Use `canvastty_agents` for workers; do not invoke Jev permission helpers or auxiliary model calls to select or verify the current model. Model identity is established by route logs.
+- In CanvasTTY, unless the person explicitly chooses a worker model, create workers with `model=jev/auto`; a fixed orchestrator model does not determine the worker model.
 - In CanvasTTY, call available MCP tools directly; discover missing tools once. Run independent workers in parallel. A completed `wait_for_agent.answer` needs no duplicate `get_agent_result` call. Do not read the standalone `jev-worker-orchestration` skill for ordinary CanvasTTY delegation. CanvasTTY session IDs belong only to `canvastty_agents`; never pass them to built-in Codex agent controls. Close completed children with `canvastty_agents.cancel_agent` once; do not interrupt them first.
 - Outside CanvasTTY, the following Jev Tool Use, Browser/Computer and compaction rules apply.
 - A manually selected model keeps normal Codex Tool Use permissions. Jev still helps with Browser Use, Computer Use and compact context in both modes.

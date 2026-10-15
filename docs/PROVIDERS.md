@@ -184,3 +184,20 @@ account and unrelated routes remain usable. Complete exhaustion can recover a
 secondary route before a longer primary auth cooldown. Legacy configs retain
 their historical sticky/shared-primary state and request-shape 400 handoffs; convert using `routes apply` for
 full per-account cooldowns. No upstream error body enters routing telemetry.
+
+
+### Fixed primary model with automatic workers
+
+A client route whose upstream model is one of the configured native model IDs
+(for example `gpt-6.1-sol`) requests that exact model and reasoning effort from
+the Jev endpoint. It skips classification and route leases, while retaining the
+provider sequence and its transport checks. Unsupported fixed models or effort
+values fail without substituting another model. Project routing policy still
+applies. The default effort for a fixed request is `medium`.
+
+Keep `jev/auto` as the worker route; its upstream model remains `auto` and each
+worker keeps its independent automatic decisions. In login-free Codex profiles,
+check the router's native alias map before selecting a native-looking model ID:
+a picker slot may refer to `jev/auto`. Declare a distinct curated fixed route
+and publish the catalog before making that route the primary session default.
+The installer continues to preserve the person's selected default model.

@@ -400,8 +400,8 @@ def prompt(event):
         if value.get("permission_owner") != owner:
             value["permission_owner"] = owner
             transition["changed"] = True
-        if native_owner and value.get("canvastty_workflow_version") != 3:
-            value["canvastty_workflow_version"] = 3
+        if native_owner and value.get("canvastty_workflow_version") != 4:
+            value["canvastty_workflow_version"] = 4
             transition["changed"] = True
         if mode and value.get("tool_mode") != mode:
             value["tool_mode"] = mode
@@ -426,6 +426,7 @@ def prompt(event):
                            "Jev only selects the model and reasoning depth through the router. "
                            "Use canvastty_agents for CanvasTTY workers. Do not invoke auxiliary model helpers "
                            "to select or verify the current model; external route logs establish model identity. "
+                           "Unless the person chooses a worker model, create workers with model=jev/auto independently of the orchestrator model. "
                            "Call available tools directly, discover missing tools once, and create independent workers in parallel. "
                            "A completed wait_for_agent answer needs no duplicate get_agent_result. "
                            "Do not read the standalone jev-worker-orchestration skill for ordinary CanvasTTY delegation. "

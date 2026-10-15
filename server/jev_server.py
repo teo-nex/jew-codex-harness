@@ -2234,7 +2234,9 @@ class Handler(BaseHTTPRequestHandler):
         affinity = cache_affinity(scope, payload)
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
-        models = automatic_models(self._policy_ladder.available_models() if self._policy_ladder else TIERS)
+        available_models = self._policy_ladder.available_models() if self._policy_ladder else TIERS
+        models = automatic_models(available_models)
+        fixed_model = payload.get("model") if payload.get("model") in TIERS else None
         questions = questions_for_models(models)
         leased = route_lease(scope, payload, step)
         if leased and leased["model"] not in models:
@@ -2242,6 +2244,14 @@ class Handler(BaseHTTPRequestHandler):
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
             decision_source = "project_policy"
+        elif fixed_model is not None:
+            if fixed_model not in available_models:
+                return self._json(400, {"error": {"message": "Requested fixed model is not configured in the provider sequence"}})
+            requested_reasoning = payload.get("reasoning")
+            effort = requested_reasoning.get("effort", "medium") if isinstance(requested_reasoning, dict) else "medium"
+            if effort not in EFFORTS:
+                return self._json(400, {"error": {"message": "Unsupported reasoning effort for fixed model"}})
+            model, speed, gate, decision_source = fixed_model, "default", "manual", "manual"
         elif os.path.exists(OFF_PATH):
             model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "off"
         else:
@@ -2280,7 +2290,7 @@ class Handler(BaseHTTPRequestHandler):
                 decision_source = "technical_fallback"
 
         if (os.environ.get("JEV_LADDER_MODE") == "active"
-                and (self._project_policy or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
+                and (self._project_policy or fixed_model is not None or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
                 and isinstance(payload.get("prompt_cache_key"), str)
                 and payload["prompt_cache_key"].strip()))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
