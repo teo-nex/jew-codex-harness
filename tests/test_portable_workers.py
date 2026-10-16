@@ -65,8 +65,9 @@ class PortableWorkersTest(unittest.TestCase):
                 portable.submit({**task, "request_id": "missing-hook"})
 
     def test_mutable_runner_reports_real_changes_checks_and_guard(self):
+        content = "ok \u041f\u0440\u0438\u0432\u0435\u0442"
         task = {**self.task, "read_only": False, "allowed_files": ["answer.txt"],
-                "acceptance_commands": [[sys.executable, "-c", "from pathlib import Path; assert Path('answer.txt').read_text() == 'ok'"]]}
+                "acceptance_commands": [[sys.executable, "-c", "from pathlib import Path; assert Path('answer.txt').read_text(encoding='utf-8') == " + repr(content)]]}
         with mock.patch.object(portable.shutil, "which", return_value="/fake/codex"), \
              mock.patch.object(portable.subprocess, "Popen"):
             task_id = portable.submit(task)["task_id"]
@@ -75,8 +76,11 @@ class PortableWorkersTest(unittest.TestCase):
         def launch(command, **kwargs):
             self.assertIn("workspace-write", command)
             self.assertIn("features.hooks=true", command)
+            self.assertIn("features.plugins=false", command)
+            self.assertIn("features.apps=false", command)
+            self.assertIn("features.skill_mcp_dependency_install=false", command)
             self.assertEqual(kwargs["env"]["JEV_WORKER_MANIFEST"], str(directory / "task.json"))
-            (self.cwd / "answer.txt").write_text("ok", encoding="utf-8")
+            (self.cwd / "answer.txt").write_text(content, encoding="utf-8")
             (directory / "answer.txt").write_text("Done", encoding="utf-8")
             (directory / "guard.jsonl").write_text(json.dumps({"task_id": task_id, "allowed": True}) + "\n", encoding="utf-8")
             child = mock.Mock(returncode=0)
@@ -98,6 +102,7 @@ class PortableWorkersTest(unittest.TestCase):
         self.assertEqual(result["changed_files"], [str(self.cwd / "answer.txt")])
         self.assertEqual(result["checks"][0]["exit_code"], 0)
         self.assertTrue(Path(result["patch"]["patch_file"]).is_file())
+        self.assertIn(content, Path(result["patch"]["patch_file"]).read_text(encoding="utf-8"))
 
     def test_mutable_success_without_guard_is_rejected(self):
         with mock.patch.object(portable.shutil, "which", return_value="/fake/codex"), \

@@ -12,6 +12,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from unittest import mock
 
 ROOT = Path(__file__).resolve().parents[1]
+FILE_TEXT = "JEV_WORKER_OK \u041f\u0440\u0438\u0432\u0435\u0442\n"
 sys.path[:0] = [str(ROOT), str(ROOT / "integrations/workers")]
 import portable
 from harness.core import _hook_entries
@@ -50,7 +51,7 @@ def run_case(kind, executable, catalog):
                 index = len(requests)
                 if index == 1:
                     name = "outside.txt" if kind == "outside" else "owned.txt"
-                    patch = f"*** Begin Patch\n*** Add File: {name}\n+JEV_WORKER_OK\n*** End Patch"
+                    patch = f"*** Begin Patch\n*** Add File: {name}\n+{FILE_TEXT}*** End Patch"
                     flat = [child for t in body["tools"] for child in t.get("tools", [t])]
                     tool = next((t for t in flat if t.get("name") == "apply_patch"), None)
                     if tool is None:
@@ -122,6 +123,8 @@ def run_case(kind, executable, catalog):
                 edited = (cwd / "owned.txt").exists()
                 escaped = (cwd / "outside.txt").exists()
                 success = (result["state"] == "completed" and edited and not escaped and bool(reviews)
+                           and (cwd / "owned.txt").read_text(encoding="utf-8") == FILE_TEXT
+                           and FILE_TEXT.strip() in Path(result["patch"]["patch_file"]).read_text(encoding="utf-8")
                            if kind == "owned" else result["state"] == "failed" and not edited and not escaped
                            and result.get("reason") == "worker_tool_denied" and len(requests) >= 2
                            and result.get("guard_observed") is True)

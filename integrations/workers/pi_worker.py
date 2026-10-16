@@ -114,13 +114,13 @@ def make_patch(task_dir, changed_files):
     for name in changed_files:
         path = Path(name)
         try:
-            old = (task_dir / "baseline-files" / manifest[name]).read_text().splitlines(keepends=True) if name in manifest else []
-            new = path.read_text().splitlines(keepends=True) if path.is_file() and path.stat().st_size <= 1_000_000 else []
+            old = (task_dir / "baseline-files" / manifest[name]).read_text(encoding="utf-8").splitlines(keepends=True) if name in manifest else []
+            new = path.read_text(encoding="utf-8").splitlines(keepends=True) if path.is_file() and path.stat().st_size <= 1_000_000 else []
         except (UnicodeError, OSError):
             continue
         parts.extend(difflib.unified_diff(old, new, fromfile="a/" + name, tofile="b/" + name))
     patch = task_dir / "changes.patch"
-    patch.write_text("".join(parts))
+    patch.write_text("".join(parts), encoding="utf-8")
     patch.chmod(0o600)
     return {"patch_file": str(patch), "patch_sha256": hashlib.sha256(patch.read_bytes()).hexdigest()}
 

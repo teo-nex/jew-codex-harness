@@ -222,6 +222,8 @@ def _run_task(task_id):
                "-c", "features.code_mode_only=false", "-c", 'web_search="disabled"',
                "-c", "agents.enabled=false", "-c", 'approval_policy="never"',
                "-c", "apps._default.enabled=false", "-c", "features.memories=false",
+               "-c", "features.plugins=false", "-c", "features.apps=false",
+               "-c", "features.remote_plugin=false", "-c", "features.skill_mcp_dependency_install=false",
                "-c", "sandbox_workspace_write.network_access=false"]
     home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     config_path = home / "config.toml"
