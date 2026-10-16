@@ -26,6 +26,8 @@ class InstallCoreTests(unittest.TestCase):
         platform_patch.start()
         self.addCleanup(platform_patch.stop)
         self.root = Path(self.temp.name)
+        # Keep launchd checkpoint inventory away from the real installed service.
+        self.enterContext(mock.patch("harness.platforms.macos.Path.home", return_value=self.root))
         if os.name == "nt":
             from harness.platforms.windows import _private_state_dir
             _private_state_dir(self.root, create=False)

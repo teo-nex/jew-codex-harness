@@ -93,6 +93,21 @@ SHA-256 identifies those exact saved bytes.
 
 The installer adds the global Jev Browser/Computer/Compact instructions to the profile's `AGENTS.md`. On macOS it also registers `jev-browser` when the CanvasTTY browser helper is installed; the browser broker remains optional elsewhere.
 
+## CanvasTTY permission ownership
+
+In CanvasTTY-launched Codex sessions, CanvasTTY owns all tool permissions;
+Jev only selects the model and reasoning depth. The hook recognizes the complete
+inherited CanvasTTY runtime context (Codex provider, terminal session UUID,
+address and capability). Tool arguments and profile labels cannot select this path.
+The harness returns no permission verdict, so it cannot override a CanvasTTY
+refusal. CanvasTTY's native hook remains responsible for authenticating its own
+capability, base protection and unavailable-runtime handling in Auto and Bypass.
+
+These sessions do not make extra Jev calls for skill hints, tool authorization or
+compaction selection. Bounded local context carry is retained. Standalone Codex
+sessions without complete CanvasTTY launch metadata retain the existing Jev guards.
+No confidence threshold is lowered and the CanvasTTY installation is not modified.
+
 ## Platform scope
 
 | Component | macOS | Linux | Windows |

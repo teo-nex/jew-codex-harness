@@ -39,3 +39,22 @@ workers require reviewed hooks. A macOS CanvasTTY session cannot start a
 nested Seatbelt sandbox, so it retains the native CanvasTTY worker backend.
 No live provider or installed-profile acceptance is claimed by source or
 synthetic client checks.
+
+## CanvasTTY native orchestration with jev/auto
+
+CanvasTTY Orchestrator sessions use their own `canvastty_agents` MCP server.
+In sessions with complete inherited CanvasTTY runtime metadata, the global hook
+returns no permission verdict for any tool. CanvasTTY validates caller identity,
+child ownership, project directory, profile ceiling, isolation and launch options;
+its own hooks continue to enforce tool permissions in Auto and Bypass. Arguments
+pass through unchanged. Jev selects only models and reasoning depth. Outside
+CanvasTTY, existing Jev guards remain unchanged; an MCP tool name alone does not
+select the CanvasTTY permission policy.
+
+Select `jev/auto` for each child that should route through Jev and start CanvasTTY
+with the intended `CODEX_HOME`. An external route must also support the client's
+tool search history as described in [provider configuration](PROVIDERS.md).
+
+Native orchestration does not add the `jev-workers` manifest, file allowlist or
+acceptance and transfer workflow. Outside CanvasTTY, use `jev-workers` when
+that workflow is needed.
