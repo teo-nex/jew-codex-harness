@@ -150,6 +150,26 @@ class IdleCompactTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(self.c.closed)
         self.assertFalse(any(m.get("id") == 4 for m in self.up))
 
+    async def test_new_arrival_cannot_overtake_existing_queue_during_drain(self):
+        self.hold, self.now = True, 1800
+        task = asyncio.create_task(self.c.tick())
+        for _ in range(20):
+            await asyncio.sleep(0)
+            if self.compacts():
+                break
+        for identifier in (10, 11):
+            await self.c.client({"id": identifier, "method": "thread/read"})
+        original = self.c.upstream
+        async def interleave(message):
+            await original(message)
+            if message.get("id") == 10:
+                await self.c.client({"id": 12, "method": "thread/read"})
+        self.c.upstream = interleave
+        await self.finish()
+        await task
+        self.assertEqual([m["id"] for m in self.up if m.get("id") in (10, 11, 12)], [10, 11, 12])
+        self.assertEqual(self.c.queued_bytes, 0)
+
     async def test_no_compact_for_empty_session_or_failed_work(self):
         self.c.threads["t"].armed = False
         self.now = 9000

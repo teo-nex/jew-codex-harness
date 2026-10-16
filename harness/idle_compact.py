@@ -75,11 +75,11 @@ class Controller:
             if state.status == "idle" and state.armed:
                 state.idle_since = self.clock()
 
-    async def client(self, message):
+    async def client(self, message, *, releasing=False):
         method = message.get("method")
         # Approval replies and an explicit user interrupt must never be trapped
         # behind our gate. New turns wait until the compact lifecycle finishes.
-        if self.gated and method and method != "turn/interrupt":
+        if self.gated and not releasing and method and method != "turn/interrupt":
             size = len(json.dumps(message).encode("utf-8"))
             if len(self.queued) >= 256 or self.queued_bytes + size > MAX_MESSAGE:
                 raise RuntimeError("idle_compact_client_queue_full")
@@ -278,12 +278,16 @@ class Controller:
             if state:
                 state.armed, state.idle_since = False, None
         finally:
-            self.compacting, self.lifecycle, self.gated = None, None, False
+            self.compacting, self.lifecycle = None, None
             if not self.closed:
-                queued, self.queued = self.queued, []
+                # Keep the gate while draining: an arriving request must not
+                # overtake one already queued when upstream.drain() yields.
+                while self.queued:
+                    message = self.queued.pop(0)
+                    self.queued_bytes -= len(json.dumps(message).encode("utf-8"))
+                    await self.client(message, releasing=True)
                 self.queued_bytes = 0
-                for message in queued:
-                    await self.client(message)
+            self.gated = False
 
 
 def owned_process_options():
