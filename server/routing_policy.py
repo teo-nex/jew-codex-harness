@@ -2,6 +2,8 @@
 import math
 import os
 
+from jev_errors import JevDecisionError
+
 POLICY_VERSION = "split-v14-bounded-routing"
 LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
 TERRA = "gpt-5.6-terra"
@@ -169,14 +171,14 @@ def _validated_choice(answers, name, choices):
     """Validate one Choice answer and its optional probability distribution."""
     answer = answers.get(name) if isinstance(answers, dict) else None
     if not isinstance(answer, dict):
-        raise ValueError(f"missing {name} decision")
+        raise JevDecisionError("missing_decision", name)
     choice = answer.get("choice")
     if not isinstance(choice, str) or choice not in choices:
-        raise ValueError(f"unknown {name} choice")
+        raise JevDecisionError("unknown_choice", name)
     probabilities = answer.get("probabilities")
     if probabilities is not None:
         if not isinstance(probabilities, dict) or set(probabilities) != set(choices):
-            raise ValueError(f"incomplete {name} distribution")
+            raise JevDecisionError("incomplete_distribution", name)
         values = list(probabilities.values())
         if any(
             isinstance(p, bool)
@@ -185,9 +187,9 @@ def _validated_choice(answers, name, choices):
             or not 0 <= p <= 1
             for p in values
         ):
-            raise ValueError(f"invalid {name} probabilities")
+            raise JevDecisionError("invalid_probabilities", name)
         if abs(sum(values) - 1) > 0.02 or probabilities[choice] < max(values) - 1e-6:
-            raise ValueError(f"inconsistent {name} distribution")
+            raise JevDecisionError("inconsistent_distribution", name)
     confidence = answer.get("confidence")
     if (
         isinstance(confidence, bool)

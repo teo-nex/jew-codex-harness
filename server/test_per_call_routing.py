@@ -10,6 +10,7 @@ The contract pinned here is:
 """
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import threading
@@ -244,6 +245,53 @@ class PerCallEndToEnd(unittest.TestCase):
             self.assertEqual(self.records[-1]["decision_source"], "technical_fallback")
             self.assertEqual(self.records[-1]["gate"], "jev_error:" + type(error).__name__)
             self.assertNotIn("private diagnostic fixture", json.dumps(self.records[-1]))
+            self.assertEqual(self.records[-1]["jev_error_stage"], "transport")
+            self.assertEqual(self.records[-1]["jev_error_reason"],
+                             "timeout" if isinstance(error, TimeoutError) else "unexpected_error")
+
+    def test_transport_and_parse_failures_reach_the_routing_log(self):
+        private = "synthetic-private-key-and-prompt"
+        for response, stage, reason, http_status in [
+            (subprocess.CompletedProcess([], 0, stdout=private, stderr=""),
+             "response_parse", "invalid_json", None),
+            (subprocess.CompletedProcess([], 1, stdout="", stderr=json.dumps({
+                "stage":"transport", "reason":"http_error", "http_status":429})),
+             "transport", "http_error", 429),
+        ]:
+            with self.subTest(reason=reason), \
+                 mock.patch.object(jev, "_node_binary", return_value="/fixture/node"), \
+                 mock.patch.object(jev.subprocess, "run", return_value=response):
+                self.call(payload_for([message("user", "inspect fixture")]))
+            row = self.records[-1]
+            self.assertEqual(row["decision_source"], "technical_fallback")
+            self.assertEqual(row["jev_error_stage"], stage)
+            self.assertEqual(row["jev_error_reason"], reason)
+            self.assertEqual(row.get("jev_error_http_status"), http_status)
+            self.assertNotIn(private, json.dumps(row))
+
+    def test_decision_validation_diagnostics_and_healthy_next_request(self):
+        invalid = answer(jev.LUNA, "low")
+        invalid["answers"]["effort"]["choice"] = "synthetic-private-key-and-prompt"
+        with mock.patch.object(jev, "call_jev_routed", return_value=invalid):
+            self.call(payload_for([message("user", "inspect fixture")]))
+        row = self.records[-1]
+        self.assertEqual(row["decision_source"], "technical_fallback")
+        self.assertEqual((row["jev_error_stage"], row["jev_error_reason"], row["jev_error_field"]),
+                         ("decision_validation", "unknown_choice", "effort"))
+        self.assertNotIn("synthetic-private", json.dumps(row))
+        with mock.patch.object(jev, "call_jev_routed", return_value=answer(jev.LUNA, "low")):
+            self.call(payload_for([message("user", "inspect healthy fixture")]))
+        self.assertEqual(self.records[-1]["decision_source"], "jev")
+        self.assertFalse(any(k.startswith("jev_error_") for k in self.records[-1]))
+
+    def test_route_application_failure_is_identified_without_exception_text(self):
+        with mock.patch.object(jev, "call_jev_routed", return_value=answer(jev.LUNA, "low")), \
+             mock.patch.object(jev, "route", side_effect=ValueError("synthetic-private-route")):
+            self.call(payload_for([message("user", "inspect fixture")]))
+        row = self.records[-1]
+        self.assertEqual(row["jev_error_stage"], "route_application")
+        self.assertEqual(row["jev_error_reason"], "invalid_route")
+        self.assertNotIn("synthetic-private", json.dumps(row))
 
     def test_native_tool_discovery_has_a_bounded_tool_step_dossier(self):
         item = {"type": "tool_search_output", "tools": [{"type": "namespace", "name": "fixture_agents",

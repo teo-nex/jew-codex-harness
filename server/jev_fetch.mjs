@@ -1,6 +1,10 @@
 #!/usr/bin/env node
 // TypeSafe's current edge rejects Python urllib (Cloudflare 1010) but accepts
 // the same bounded request through Node fetch. Secrets arrive only on stdin.
+const fail = (stage, reason, http_status, exitCode = 1) => {
+  process.stderr.write(JSON.stringify({ stage, reason, ...(Number.isInteger(http_status) ? { http_status } : {}) }) + '\n');
+  process.exit(exitCode);
+};
 const chunks = [];
 for await (const chunk of process.stdin) chunks.push(chunk);
 let input;
@@ -24,14 +28,19 @@ try {
     body: JSON.stringify(input.body),
   });
   if (!response.ok) {
-    process.stderr.write('provider HTTP ' + response.status + '\n');
-    process.exit(1);
+    fail('transport', 'http_error', response.status);
   }
-  const value = await response.json();
-  if (!value || typeof value !== 'object' || !value.answers || typeof value.answers !== 'object')
-    throw new Error('invalid provider response');
+  let value;
+  try { value = await response.json(); }
+  catch (error) {
+    fail(error instanceof SyntaxError ? 'response_parse' : 'transport',
+      error instanceof SyntaxError ? 'invalid_json' : error?.name === 'TimeoutError' ? 'timeout' : 'connection_failed');
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value))
+    fail('response_validation', 'invalid_response_type');
+  if (!value.answers || typeof value.answers !== 'object' || Array.isArray(value.answers))
+    fail('response_validation', 'missing_answers');
   process.stdout.write(JSON.stringify(value));
 } catch (error) {
-  process.stderr.write(error?.name === 'TimeoutError' ? 'provider timeout\n' : 'provider unavailable\n');
-  process.exit(1);
+  fail('transport', error?.name === 'TimeoutError' ? 'timeout' : 'connection_failed');
 }

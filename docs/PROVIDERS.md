@@ -65,7 +65,16 @@ every path. Its API rate is included in reports; native credit rates remain unkn
 independently verified. Routine commands and orchestration bookkeeping can use Luna
 with low effort. A confidence score alone never upgrades a valid small-model decision.
 A technical decision failure falls back to Sol 6.1 (or Sol 6 on legacy-only routes),
-medium effort; the exception type is recorded without private error text.
+medium effort; the exception type is recorded without private error text. On failure,
+`jev_error_stage` and `jev_error_reason` identify the transport, response parsing,
+response validation, decision validation, or route application phase. Known
+validation failures also record `jev_error_field` (one of the four question
+names); HTTP refusals record a numeric `jev_error_http_status`. These enum-only
+fields are available in `explain` and in both native and provider-ladder logs,
+including failed fallback attempts. Unknown exceptions use `unexpected_error`.
+Exception messages, tracebacks, provider bodies, keys and prompt text are never
+copied into these diagnostics. The legacy `jev_error:<type>` gate format and
+bounded fallback policy remain unchanged. Existing type-only log entries cannot be reconstructed.
 Mandatory Astra architecture and final/risk reviews stay intact.
 
 ## Fallback and recovery

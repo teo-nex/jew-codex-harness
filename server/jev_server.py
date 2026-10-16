@@ -89,6 +89,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from local_runtime import (
@@ -102,6 +103,7 @@ from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from request_budget import RequestBudget, AttemptClock, BudgetExceeded, ClientDisconnected, ExhaustedRequests
 from validated_stream import ValidatedStream
+from jev_errors import JevError, decode_response, helper_error, error_diagnostic, error_name
 from provider_failure import classify_failure
 from reasoning_effort import resolve_model_reasoning_effort
 
@@ -636,7 +638,7 @@ def fallback_candidates(native_model, payload):
 
 class _NoJevRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        raise ValueError("Jev provider redirect refused")
+        raise JevError("transport", "redirect_refused")
 
 
 def call_jev(key, state, questions=None, timeout=4.0):
@@ -650,8 +652,8 @@ def call_jev(key, state, questions=None, timeout=4.0):
             "key": key, "body": body, "provider": provider, "timeout_ms": int(timeout * 1000),
         }), text=True, capture_output=True, timeout=timeout, check=False)
         if result.returncode != 0:
-            raise RuntimeError((result.stderr or "Jev provider unavailable").strip()[:100])
-        return json.loads(result.stdout)
+            raise helper_error(result.stderr)
+        return decode_response(result.stdout)
     body = json.dumps(body).encode()
     req = urllib.request.Request(
         OPENROUTER_DECISIONS_API if provider == "openrouter" else API,
@@ -660,8 +662,16 @@ def call_jev(key, state, questions=None, timeout=4.0):
         method="POST",
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoJevRedirect())
-    with opener.open(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            return decode_response(resp.read())
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        exc.close()
+        raise JevError("transport", "http_error", http_status=status) from None
+    except urllib.error.URLError as exc:
+        reason = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_failed"
+        raise JevError("transport", reason) from None
 
 
 def call_jev_routed(key, state, questions=None, timeout=4.0):
@@ -669,7 +679,7 @@ def call_jev_routed(key, state, questions=None, timeout=4.0):
     result = call_jev(key, state, questions, timeout=timeout)
     if decision_provider() == "openrouter" and isinstance(result, dict):
         if not str(result.get("model") or "").startswith("typesafe/jev-1.13"):
-            raise ValueError("Unexpected OpenRouter decision model")
+            raise JevError("response_validation", "unexpected_model")
         # Local clients keep one stable model identity and rubric cache key.
         result = {**result, "model": MODEL}
     return result
@@ -2240,6 +2250,7 @@ class Handler(BaseHTTPRequestHandler):
         stream_requested = payload.get("stream") is True
 
         tier = depth = conf = None
+        self._jev_error = {}
         jev_ms = None
         decision = None
         jev_usage = None
@@ -2291,8 +2302,10 @@ class Handler(BaseHTTPRequestHandler):
             elif key and (task or step.get("digest") or signals.get("has_image")):
                 jt0 = time.time()
                 state = jev_state(task, prev_assistant, signals, step, affinity)
+                error_stage = "transport"
                 try:
                     result = call_jev_routed(key, state, questions=questions, timeout=min(4.0, max(0.05, self._budget.remaining())))
+                    error_stage = "decision_validation"
                     decision = decision_from_answers(result.get("answers"), models=models)
                     raw_usage = result.get("usage") or {}
                     if not isinstance(raw_usage, dict):
@@ -2302,11 +2315,13 @@ class Handler(BaseHTTPRequestHandler):
                                  and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
                     tier, depth, conf = (decision["model"], decision["effort"],
                                          decision["confidence"])
+                    error_stage = "route_application"
                     model, effort, speed, _ = route(tier, depth)
                     gate = decision["gate"]
                     decision_source = "jev"
                 except Exception as exc:
-                    model, effort, speed, gate = workhorse(models), "medium", "default", f"jev_error:{type(exc).__name__}"
+                    model, effort, speed, gate = workhorse(models), "medium", "default", f"jev_error:{error_name(exc)}"
+                    self._jev_error = error_diagnostic(exc, error_stage)
                     decision_source = "technical_fallback"
                 jev_ms = int((time.time() - jt0) * 1000)
             else:
@@ -2478,6 +2493,7 @@ class Handler(BaseHTTPRequestHandler):
             "jev_usage": jev_usage,
             "attempts": self._attempts,
             "decision_source": decision_source,
+            **self._jev_error,
             "lease": decision.get("lease") if decision else None,
             "lease_hit": decision_source == "lease",
             "gate": gate,
@@ -2635,6 +2651,7 @@ class Handler(BaseHTTPRequestHandler):
                           "reasoning_source": resolved["source"],
                           "jev_usage": jev_usage, "attempts": self._attempts,
                           "decision_source": decision_source, "gate": routing_gate,
+                          **getattr(self, "_jev_error", {}),
                           "base_tier": decision.get("base_model") if decision else None,
                           "confidence": decision.get("confidence") if decision else None,
                           "jev_ms": jev_ms,
@@ -2670,6 +2687,7 @@ class Handler(BaseHTTPRequestHandler):
                 log_line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                           "policy_version": POLICY_VERSION, "ladder_stage": "stream_incomplete",
                           "failed_stage": chosen["stage"], "model": model,
+                          **getattr(self, "_jev_error", {}),
                           "attempts": self._attempts, "status": status,
                           "cache_scope": scope, "stream": stream_requested})
                 return
@@ -2683,6 +2701,7 @@ class Handler(BaseHTTPRequestHandler):
                   "policy_version": POLICY_VERSION, "ladder_stage": "failed",
                   "jev_usage": jev_usage, "attempts": self._attempts,
                   "decision_source": decision_source,
+                  **getattr(self, "_jev_error", {}),
                   "jev_ms": jev_ms,
                   "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                   "status": status, "cache_scope": scope, "stream": stream_requested})

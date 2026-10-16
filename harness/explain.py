@@ -6,7 +6,8 @@ from pathlib import Path
 
 FIELDS = ("at", "cache_scope", "policy_version", "selected_model", "native", "base_tier", "model",
           "effort", "requested_effort", "effective_effort", "reasoning_status",
-          "reasoning_source", "decision_source", "gate", "astra_policy", "step",
+          "reasoning_source", "decision_source", "jev_error_stage", "jev_error_reason",
+          "jev_error_field", "jev_error_http_status", "gate", "astra_policy", "step",
           "ladder_stage", "status", "jev_ms", "total_ms", "project_policy", "budget_exhausted")
 ATTEMPT_FIELDS = ("provider", "transport", "model", "response_model", "selected_model", "effort", "requested_effort",
                   "effective_effort", "reasoning_status", "reasoning_source", "status",
