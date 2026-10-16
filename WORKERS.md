@@ -7,6 +7,10 @@ remains the default: its outer isolation cannot launch a nested Seatbelt
 sandbox (`sandbox-exec: sandbox_apply: Operation not permitted`). No sandbox
 is disabled to work around that restriction. `JEV_WORKER_BACKEND` explicitly
 selects `portable` or `canvastty`; the latter requires an installed macOS helper.
+Linux requires a host that permits Codex's Bubblewrap/user namespaces. The
+ephemeral Ubuntu CI runner explicitly enables that prerequisite; the installer
+does not change host kernel or AppArmor policy. A sandbox startup failure is
+not a reason to disable the worker sandbox.
 
 Pass `request_id`, `goal`, an absolute `cwd`, and explicit relative
 `allowed_files`. An existing directory grants ownership of its descendants;
