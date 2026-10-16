@@ -40,6 +40,11 @@ class PortableReportPathTests(unittest.TestCase):
         self.state = self.base / "private-state"
         self.workers = self.base / "private-workers"
 
+    def test_current_sol_destination_is_canonical_and_priceable(self):
+        self.assertEqual(api_cost.canonical_model("codex/gpt-6.1-sol-high"), "gpt-6.1-sol")
+        self.assertEqual(api_cost.OPENAI["gpt-6.1-sol"], ("2.00", "0.10", "10.00", "2.50"))
+        self.assertEqual(api_cost.NEXT_NATIVE["gpt-6.1-sol"], "gpt-6-astra")
+
     def test_paths_follow_codex_and_private_state_environment(self):
         with mock.patch.dict(os.environ, {
             "CODEX_HOME": str(self.codex),

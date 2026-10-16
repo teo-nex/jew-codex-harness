@@ -59,21 +59,22 @@ import sys
 from contextlib import ExitStack
 from itertools import chain
 from local_runtime import STATE
-from routing_policy import POLICY_VERSION
+from routing_policy import POLICY_VERSION, SOL61
 
 LIVE_LOG = os.path.join(STATE, "jev-router-live.jsonl")
 BACKTEST_STATE = os.path.join(STATE, "jev-backtest.json")
 
 LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
 TERRA = "gpt-5.6-terra"
-NATIVE_TIERS = (LUNA, TERRA, SOL, ASTRA)
+NATIVE_TIERS = (LUNA, TERRA, SOL, SOL61, ASTRA)
 HISTORICAL_NATIVE_TIERS = ("gpt-5.6-luna", "gpt-5.6-sol")
 
 # Prices per 1M tokens (input, output, cached input, cache write), short context,
-# Sep 2026 — kept identical to poc/backtest_savings.py so the two tools agree.
+# Historical Sep 2026 rates; GPT-6.1 Sol added from its Oct 2026 model documentation.
 PRICES = {
     ASTRA: (10.00, 50.00, 1.00, 12.50),
     SOL: (2.00, 10.00, 0.20, 2.50),
+    SOL61: (2.00, 10.00, 0.10, 2.50),
     "gpt-5.6-terra": (2.00, 12.00, 0.20, 2.50),
     LUNA: (0.10, 0.50, 0.01, 0.125),
     "gpt-5.6-sol": (4.00, 20.00, 0.40, 5.00),
@@ -93,6 +94,7 @@ SHORT = {
     LUNA: "luna",
     TERRA: "terra",
     SOL: "sol",
+    SOL61: "sol6.1",
     ASTRA: "astra",
     "opencode-go/deepseek-v4.1-flash": "tandem",
     "deepseek/deepseek-v4.1-flash": "tandem",
@@ -384,7 +386,7 @@ def turn_cost(model, mix=None, speed="default"):
         return None
     mix = mix or MIX
     p_in, p_out, p_cached, p_write = PRICES[key]
-    if key in (LUNA, SOL, ASTRA, "gpt-5.6-terra") and speed in ("priority", "fast"):
+    if key in NATIVE_TIERS and speed in ("priority", "fast"):
         p_in, p_out, p_cached, p_write = (p_in * API_FAST_X, p_out * API_FAST_X,
                                         p_cached * API_FAST_X, p_write * API_FAST_X)
     cached = min(mix["cached"], mix["input"])

@@ -13,7 +13,7 @@ from routing_policy import (
     MODEL_IDS,
     QUESTIONS,
     decision_from_answers,
-    route_choice,
+    route_choice, automatic_models,
 )
 
 
@@ -22,12 +22,12 @@ class SplitPolicy(unittest.TestCase):
         with mock.patch.dict(os.environ, {"JEV_DISABLE_AUTO_ASTRA": "1"}):
             decision = decision_from_answers(self.answer(model=jev.ASTRA,
                 effort="xhigh", astra_required=True))
-        self.assertEqual(decision["model"], jev.SOL)
+        self.assertEqual(decision["model"], jev.SOL61)
         self.assertEqual(decision["gate"], "policy_cap")
 
     def test_the_repeated_contract_stays_compact_and_explicit(self):
         encoded = json.dumps(QUESTIONS, separators=(",", ":"))
-        self.assertLessEqual(len(encoded), 3200)
+        self.assertLessEqual(len(encoded), 3500)
         self.assertNotIn('"luna":"luna"', encoded)
         self.assertIn("Intermittent or concurrency failures", encoded)
         self.assertIn("independent final code review", encoded)
@@ -82,7 +82,7 @@ class SplitPolicy(unittest.TestCase):
             "model": {
                 "choice": pair["model"],
                 "confidence": 0.95,
-                "probabilities": self.distribution(MODEL_IDS, pair["model"]),
+                "probabilities": self.distribution(QUESTIONS["model"]["criteria"], pair["model"]),
             },
             "effort": {
                 "choice": pair["effort"],
@@ -97,7 +97,7 @@ class SplitPolicy(unittest.TestCase):
         }
 
     def test_valid_independent_choices_are_combined_without_an_override(self):
-        for model in jev.TIERS:
+        for model in automatic_models(jev.TIERS):
             for effort in jev.EFFORTS:
                 result = decision_from_answers(self.answer(model, effort))
                 self.assertEqual(result["model"], model)
@@ -135,7 +135,7 @@ class SplitPolicy(unittest.TestCase):
     def test_invalid_distributions_are_rejected_for_each_question(self):
         for question, choices in (
             ("astra_policy", ASTRA_POLICY),
-            ("model", MODEL_IDS),
+            ("model", QUESTIONS["model"]["criteria"]),
             ("effort", DEPTH_PROFILES),
             ("lease", LEASE_PROFILES),
         ):
@@ -160,17 +160,18 @@ class SplitPolicy(unittest.TestCase):
         with self.assertRaises(ValueError):
             decision_from_answers(answer)
 
-    def test_missing_or_invalid_confidence_is_diagnostic_only(self):
-        for confidence in (None, True, float("nan"), -1, 2, "high"):
+    def test_small_model_decisions_are_not_upgraded_by_confidence_alone(self):
+        for confidence in (None, True, float("nan"), -1, 2, "high", 0.2, 0.82):
             answer = self.answer()
             answer["astra_policy"]["confidence"] = confidence
             answer["model"]["confidence"] = confidence
             answer["effort"]["confidence"] = confidence
             answer["lease"]["confidence"] = confidence
             result = decision_from_answers(answer)
-            self.assertIsNone(result["confidence"])
-            self.assertEqual(result["model"], jev.SOL)
-            self.assertEqual(result["gate"], "confidence_hold")
+            if confidence not in (0.2, 0.82):
+                self.assertIsNone(result["confidence"])
+            self.assertEqual(result["model"], jev.LUNA)
+            self.assertEqual(result["gate"], "apply")
 
 
 if __name__ == "__main__":

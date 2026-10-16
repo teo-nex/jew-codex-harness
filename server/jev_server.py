@@ -89,6 +89,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from local_runtime import (
@@ -96,12 +97,13 @@ from local_runtime import (
     private_regular, protect_logs,
 )
 
-from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
-                            TIERS, decision_from_answers, route)
+from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, SOL61, TERRA,
+                            TIERS, automatic_models, workhorse, decision_from_answers, questions_for_models, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
 from request_budget import RequestBudget, AttemptClock, BudgetExceeded
 from provider_failure import classify_failure
+from jev_errors import JevError, decode_response, helper_error, error_diagnostic, error_name
 from reasoning_effort import resolve_model_reasoning_effort
 
 HOME = os.path.expanduser("~")
@@ -164,6 +166,9 @@ FALLBACK_DISCOVERY_TIMEOUT = 6.0
 FALLBACK_CACHE_TTL = 30.0
 _fallback_cache = {}
 _fallback_cache_lock = threading.Lock()
+_client_version_cache = {}
+_client_version_lock = threading.Lock()
+CLIENT_VERSION_CACHE_TTL = 300.0
 # The conservative fallback thinking ladder. Existing Go routes declare low/high/max where the
 # native native model ladder exposes low/medium/high/xhigh/max, so a depth keeps its meaning
 # by landing on the middle rung instead of collapsing onto the floor: Jev says
@@ -439,6 +444,41 @@ def _node_binary():
                  if candidate and os.path.isfile(candidate) and os.access(candidate, os.X_OK)), None)
 
 
+def installed_codex_version():
+    """Use the bundled router's shim-safe CLI resolver, never a pinned version."""
+    with _client_version_lock:
+        now = time.monotonic()
+        if "at" in _client_version_cache and now - _client_version_cache["at"] < CLIENT_VERSION_CACHE_TTL:
+            return _client_version_cache.get("version")
+        node = _node_binary()
+        helper = os.path.join(os.path.dirname(__file__), "codex_client_version.mjs")
+        version = None
+        if node and os.path.isfile(helper):
+            try:
+                result = subprocess.run([
+                    node, helper,
+                ], capture_output=True, text=True, timeout=3, check=False)
+                match = re.fullmatch(r"codex-cli (\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?)", result.stdout.strip())
+                if result.returncode == 0 and match and len(match[1]) <= 32:
+                    version = match[1]
+            except (OSError, subprocess.SubprocessError):
+                pass
+        _client_version_cache.update(at=now, version=version)
+        return version
+
+
+def codex_client_version(headers=None):
+    """Preserve an actual caller version, or detect the installed CLI locally."""
+    headers = {key.lower(): value for key, value in (headers or {}).items()}
+    version = headers.get("version", "")
+    if len(version) <= 32 and re.fullmatch(r"\d+\.\d+\.\d+(?:[-+][A-Za-z0-9.-]+)?", version):
+        return version
+    # Proxy product versions (for example codex-router) are not CLI versions.
+    match = re.search(r"(?:^|\s)(?:codex_cli_rs|codex_exec|codex-cli)/(\d+\.\d+\.\d+)(?=\s|$)",
+                      headers.get("user-agent", ""))
+    return match[1] if match else installed_codex_version()
+
+
 def _fallback_constraints(payload):
     """Small local capability hints; none of this state is sent to Jev."""
     try:
@@ -596,7 +636,7 @@ def fallback_candidates(native_model, payload):
 
 class _NoJevRedirect(urllib.request.HTTPRedirectHandler):
     def redirect_request(self, request, fp, code, msg, headers, newurl):
-        raise ValueError("Jev provider redirect refused")
+        raise JevError("transport", "redirect_refused")
 
 
 def call_jev(key, state, questions=None, timeout=4.0):
@@ -610,8 +650,8 @@ def call_jev(key, state, questions=None, timeout=4.0):
             "key": key, "body": body, "provider": provider, "timeout_ms": int(timeout * 1000),
         }), text=True, capture_output=True, timeout=timeout, check=False)
         if result.returncode != 0:
-            raise RuntimeError((result.stderr or "Jev provider unavailable").strip()[:100])
-        return json.loads(result.stdout)
+            raise helper_error(result.stderr)
+        return decode_response(result.stdout)
     body = json.dumps(body).encode()
     req = urllib.request.Request(
         OPENROUTER_DECISIONS_API if provider == "openrouter" else API,
@@ -620,8 +660,16 @@ def call_jev(key, state, questions=None, timeout=4.0):
         method="POST",
     )
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), _NoJevRedirect())
-    with opener.open(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            return decode_response(resp.read())
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        exc.close()
+        raise JevError("transport", "http_error", http_status=status) from None
+    except urllib.error.URLError as exc:
+        reason = "timeout" if isinstance(exc.reason, TimeoutError) else "connection_failed"
+        raise JevError("transport", reason) from None
 
 
 def call_jev_routed(key, state, questions=None, timeout=4.0):
@@ -629,7 +677,7 @@ def call_jev_routed(key, state, questions=None, timeout=4.0):
     result = call_jev(key, state, questions, timeout=timeout)
     if decision_provider() == "openrouter" and isinstance(result, dict):
         if not str(result.get("model") or "").startswith("typesafe/jev-1.13"):
-            raise ValueError("Unexpected OpenRouter decision model")
+            raise JevError("response_validation", "unexpected_model")
         # Local clients keep one stable model identity and rubric cache key.
         result = {**result, "model": MODEL}
     return result
@@ -783,7 +831,7 @@ def extract(payload):
         n_items = len(inp)
         tail = inp[-6:]
         for item in tail:
-            if isinstance(item, dict) and item.get("type") == "function_call_output":
+            if isinstance(item, dict) and item.get("type") in ("function_call_output", "custom_tool_call_output", "tool_search_output"):
                 tool_tail = True
             if isinstance(item, dict) and isinstance(item.get("content"), list):
                 for part in item["content"]:
@@ -899,6 +947,23 @@ def classify(payload):
                     "results": errors[:3] if errors else rows[-3:],
                 }
                 detail["errored"] = bool(errors)
+        elif ltype == "tool_search_output":
+            # Discovery results are tool plumbing, not a new complex user task. Keep names only;
+            # tool schemas and descriptions remain exclusively in the executor's full context.
+            discovered = last.get("tools")
+            names, pending = [], list(discovered[:32]) if isinstance(discovered, list) else []
+            for _ in range(64):
+                if not pending or len(names) >= 16:
+                    break
+                tool = pending.pop(0)
+                if not isinstance(tool, dict):
+                    continue
+                if isinstance(tool.get("tools"), list):
+                    pending.extend(tool["tools"][:32])
+                elif isinstance(tool.get("name"), str):
+                    names.append(tool["name"][:120])
+            detail.update(step_type="tool_step", digest=("Available tools: " + ", ".join(names))[:DIGEST_CHARS],
+                          tool_call={"name": "tool_search"})
         elif last.get("role") == "user":
             detail["step_type"] = "user_turn"
     return detail
@@ -965,6 +1030,7 @@ def _debug_shape(payload):
 
 ROUTE_GLYPHS = {
     "gpt-6-luna": ("luna", "⚡"),      # cheap tier, adaptive thinking
+    "gpt-6.1-sol": ("sol6.1", "🧠"),
     "gpt-6-sol": ("sol", "🧠"),        # reasoning workhorse
     "gpt-6-astra": ("astra", "🚀"),      # frontier
     "gpt-5.6-terra": ("terra", "🌍"),
@@ -2112,6 +2178,7 @@ class Handler(BaseHTTPRequestHandler):
         stream_requested = payload.get("stream") is True
 
         tier = depth = conf = None
+        self._jev_error = {}
         jev_ms = None
         decision = None
         jev_usage = None
@@ -2129,9 +2196,23 @@ class Handler(BaseHTTPRequestHandler):
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
         leased = route_lease(scope, payload, step)
+        available_models = self._policy_ladder.available_models() if self._policy_ladder else TIERS
+        models = automatic_models(available_models)
+        fixed_model = payload.get("model") if payload.get("model") in TIERS else None
+        questions = questions_for_models(models)
+        if leased and leased["model"] not in models:
+            leased = None
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
             decision_source = "project_policy"
+        elif fixed_model is not None:
+            if fixed_model not in available_models:
+                return self._json(400, {"error": {"message": "Requested fixed model is not configured in the provider sequence"}})
+            requested_reasoning = payload.get("reasoning")
+            effort = requested_reasoning.get("effort", "medium") if isinstance(requested_reasoning, dict) else "medium"
+            if effort not in EFFORTS:
+                return self._json(400, {"error": {"message": "Unsupported reasoning effort for fixed model"}})
+            model, speed, gate, decision_source = fixed_model, "default", "manual", "manual"
         elif os.path.exists(OFF_PATH):
             model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "off"
         else:
@@ -2147,9 +2228,11 @@ class Handler(BaseHTTPRequestHandler):
             elif key and (task or step.get("digest") or signals.get("has_image")):
                 jt0 = time.time()
                 state = jev_state(task, prev_assistant, signals, step, affinity)
+                error_stage = "transport"
                 try:
-                    result = call_jev_routed(key, state, timeout=min(4.0, max(0.05, self._budget.remaining())))
-                    decision = decision_from_answers(result.get("answers"))
+                    result = call_jev_routed(key, state, questions=questions, timeout=min(4.0, max(0.05, self._budget.remaining())))
+                    error_stage = "decision_validation"
+                    decision = decision_from_answers(result.get("answers"), models=models)
                     raw_usage = result.get("usage") or {}
                     if not isinstance(raw_usage, dict):
                         raw_usage = {}
@@ -2158,24 +2241,26 @@ class Handler(BaseHTTPRequestHandler):
                                  and isinstance(v, int) and not isinstance(v, bool) and v >= 0}
                     tier, depth, conf = (decision["model"], decision["effort"],
                                          decision["confidence"])
+                    error_stage = "route_application"
                     model, effort, speed, _ = route(tier, depth)
                     gate = decision["gate"]
                     decision_source = "jev"
                 except Exception as exc:
-                    model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", f"jev_error:{type(exc).__name__}"
+                    model, effort, speed, gate = workhorse(models), "medium", "default", f"jev_error:{error_name(exc)}"
+                    self._jev_error = error_diagnostic(exc, error_stage)
                     decision_source = "technical_fallback"
                 jev_ms = int((time.time() - jt0) * 1000)
             else:
-                model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", "no_key_or_task"
+                model, effort, speed, gate = workhorse(models), "medium", "default", "no_key_or_task"
                 decision_source = "technical_fallback"
 
         if (os.environ.get("JEV_LADDER_MODE") == "active"
-                and (self._project_policy or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
+                and (self._project_policy or fixed_model is not None or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
                 and isinstance(payload.get("prompt_cache_key"), str)
                 and payload["prompt_cache_key"].strip()))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
                                       jev_usage, stream_requested, debug, t0, jev_ms,
-                                      decision_source)
+                                      decision_source, routing_gate=gate)
 
         shadow_enabled = os.path.exists(SHADOW_PATH)
 
@@ -2323,6 +2408,7 @@ class Handler(BaseHTTPRequestHandler):
             "jev_usage": jev_usage,
             "attempts": self._attempts,
             "decision_source": decision_source,
+            **self._jev_error,
             "lease": decision.get("lease") if decision else None,
             "lease_hit": decision_source == "lease",
             "gate": gate,
@@ -2368,7 +2454,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def _serve_ladder(self, payload, scope, base_model, effort, decision, step,
                       jev_usage, stream_requested, debug, started_at=None, jev_ms=None,
-                      decision_source=None):
+                      decision_source=None, routing_gate=None):
         """One canonical Codex replay, with quota-aware provider priority."""
         try:
             ladder = getattr(self, "_policy_ladder", None) or _provider_ladder()
@@ -2469,7 +2555,10 @@ class Handler(BaseHTTPRequestHandler):
                           "reasoning_status": resolved["status"],
                           "reasoning_source": resolved["source"],
                           "jev_usage": jev_usage, "attempts": self._attempts,
-                          "decision_source": decision_source,
+                          "decision_source": decision_source, "gate": routing_gate,
+                          **getattr(self, "_jev_error", {}),
+                          "base_tier": decision.get("base_model") if decision else None,
+                          "confidence": decision.get("confidence") if decision else None,
                           "jev_ms": jev_ms,
                           "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                           "status": status, "cache_scope": scope, "stream": stream_requested})
@@ -2502,6 +2591,7 @@ class Handler(BaseHTTPRequestHandler):
                 log_line({"at": time.strftime("%Y-%m-%dT%H:%M:%S"),
                           "policy_version": POLICY_VERSION, "ladder_stage": "stream_incomplete",
                           "failed_stage": chosen["stage"], "model": model,
+                          **getattr(self, "_jev_error", {}),
                           "attempts": self._attempts, "status": status,
                           "cache_scope": scope, "stream": stream_requested})
                 return
@@ -2515,6 +2605,7 @@ class Handler(BaseHTTPRequestHandler):
                   "policy_version": POLICY_VERSION, "ladder_stage": "failed",
                   "jev_usage": jev_usage, "attempts": self._attempts,
                   "decision_source": decision_source,
+                  **getattr(self, "_jev_error", {}),
                   "jev_ms": jev_ms,
                   "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                   "status": status, "cache_scope": scope, "stream": stream_requested})
@@ -2602,6 +2693,9 @@ class Handler(BaseHTTPRequestHandler):
             # the parent consumes the marker and never forwards it upstream.
             if external:
                 headers["Authorization"] = "Bearer " + external["key"]
+                version = codex_client_version(getattr(self, "headers", None))
+                if version:
+                    headers["Version"] = version
                 if external.get("account"):
                     headers["X-OmniRoute-Connection"] = external["account"]
             else:

@@ -22,7 +22,8 @@ identifiers; they are labels, not predefined provider names. Each entry has:
 - `transport`: `omniroute` (default) or `native` (the bundled Codex router).
 - `model`: one exact destination ID for every Jev decision; or `models`: a
   complete mapping from `gpt-6-luna`, `gpt-5.6-terra`, `gpt-6-sol` and
-  `gpt-6-astra` to exact destination IDs. Do not supply both fields.
+  `gpt-6-astra` to exact destination IDs. It may additionally map `gpt-6.1-sol`;
+  existing four-model mappings remain valid. Do not supply both fields.
 - `connection_ids`: optional ordered list of 1-32 unique OmniRoute account IDs.
   Omitting it lets the existing gateway choose the connection. Native routes
   cannot specify external account IDs.
@@ -38,6 +39,43 @@ the mapping. See [reasoning routing](REASONING.md). Unknown support is recorded
 as unknown, not inferred from a provider name. An empty profile object is valid.
 Mixed legacy/v2 fields, duplicate IDs, partial model mappings and invalid
 reasoning profiles are rejected before installation.
+
+## Optional model tiers
+
+When GPT-6.1 Sol is available across the provider sequence, automatic routing
+offers it instead of GPT-6 Sol. Manual model IDs and legacy mappings remain valid. Add
+`"gpt-6.1-sol": "codex/gpt-6.1-sol"` to each mapped provider that has verified
+this exact destination. A choice is offered only when every mapped fallback
+provider includes it; fixed routes still replace any choice explicitly, and
+unmapped native routes preserve it. Legacy sequences keep their original four
+choices. The wizard retains its four required destinations; optional mappings
+can be added to the protected provider file before installation or reconfiguration.
+
+For external Responses requests the harness forwards the caller's Codex version
+when present, otherwise detects the installed CLI through the bundled router's
+shim-safe resolver (cached for five minutes). Explicit CLI configuration takes
+priority, then a real CLI on PATH or in the user's local bin, then bundled desktop
+copies. Router shims are never executed. It never fabricates a newer version.
+This matters when a gateway's default client version predates a newly added model.
+The verified GPT-6.1 Sol reasoning levels are low, medium, high, xhigh and max:
+[official model documentation](https://developers.openai.com/api/docs/models/gpt-6.1-sol).
+Gateway adapters can narrow that range; declare their observed limits in
+`reasoning_profiles` rather than assuming the entire published range works on
+every path. Its API rate is included in reports; native credit rates remain unknown until
+independently verified. Routine commands and orchestration bookkeeping can use Luna
+with low effort. A confidence score alone never upgrades a valid small-model decision.
+A technical decision failure falls back to Sol 6.1 (or Sol 6 on legacy-only routes),
+medium effort; the exception type is recorded without private error text. On failure,
+`jev_error_stage` and `jev_error_reason` identify the transport, response parsing,
+response validation, decision validation, or route application phase. Known
+validation failures also record `jev_error_field` (one of the four question
+names); HTTP refusals record a numeric `jev_error_http_status`. These enum-only
+fields are available in `explain` and in both native and provider-ladder logs,
+including failed fallback attempts. Unknown exceptions use `unexpected_error`.
+Exception messages, tracebacks, provider bodies, keys and prompt text are never
+copied into these diagnostics. The legacy `jev_error:<type>` gate format and
+bounded fallback policy remain unchanged. Existing type-only log entries cannot be reconstructed.
+Mandatory Astra architecture and final/risk reviews stay intact.
 
 ## Fallback and recovery
 
@@ -141,3 +179,20 @@ account and unrelated routes remain usable. Complete exhaustion can recover a
 secondary route before a longer primary auth cooldown. Legacy configs retain
 their historical sticky/shared-primary state and request-shape 400 handoffs; convert using `routes apply` for
 full per-account cooldowns. No upstream error body enters routing telemetry.
+
+
+### Fixed primary model with automatic workers
+
+A client route whose upstream model is one of the configured native model IDs
+(for example `gpt-6.1-sol`) requests that exact model and reasoning effort from
+the Jev endpoint. It skips classification and route leases, while retaining the
+provider sequence and its transport checks. Unsupported fixed models or effort
+values fail without substituting another model. Project routing policy still
+applies. The default effort for a fixed request is `medium`.
+
+Keep `jev/auto` as the worker route; its upstream model remains `auto` and each
+worker keeps its independent automatic decisions. In login-free Codex profiles,
+check the router's native alias map before selecting a native-looking model ID:
+a picker slot may refer to `jev/auto`. Declare a distinct curated fixed route
+and publish the catalog before making that route the primary session default.
+The installer continues to preserve the person's selected default model.

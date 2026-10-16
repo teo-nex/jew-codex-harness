@@ -16,6 +16,30 @@ CONFIG = {"plus_connection_id": "plus-id", "gemini_connection_ids": ["gemini-one
 
 
 class LadderForwardTests(unittest.TestCase):
+    def test_jev_failure_diagnostics_survive_ladder_outcomes(self):
+        details = {"jev_error_stage": "decision_validation", "jev_error_reason": "missing_decision",
+                   "jev_error_field": "model"}
+        for outcome in ("completed", "stream_incomplete", "failed"):
+            with self.subTest(outcome=outcome), tempfile.TemporaryDirectory() as directory:
+                ladder = Ladder(CONFIG, Path(directory) / "state.json")
+                handler = self.handler()
+                handler._jev_error = details
+                def forward(payload, *args, **kwargs):
+                    handler._attempts.append({"model": payload["model"], "status": 200 if outcome != "failed" else 400,
+                        "terminal_type": "response.completed" if outcome == "completed" else "response.failed"})
+                    return (400 if outcome == "failed" else 200, "sse", "application/json", False,
+                            b'{"error":{"message":"invalid request"}}' if outcome == "failed" else None, None)
+                handler._forward = forward
+                with mock.patch.object(jev, "_provider_ladder", return_value=ladder), \
+                     mock.patch.object(jev, "_omniroute_key", return_value="synthetic"), \
+                     mock.patch.object(jev, "log_line") as logged:
+                    handler._serve_ladder({"model":"jev/auto", "input":"fixture"}, "scope", jev.LUNA,
+                        "low", None, {"step_type":"user_turn"}, None, True, False,
+                        decision_source="technical_fallback", routing_gate="jev_error:ValueError")
+                row = logged.call_args.args[0]
+                self.assertEqual({k:v for k,v in row.items() if k.startswith("jev_error_")}, details)
+                self.assertEqual(row["ladder_stage"], "plus" if outcome == "completed" else outcome)
+
     def test_wire_summary_contains_only_event_types(self):
         raw = (b'event: response.output_text.delta\n'
                b'data: {"type":"response.output_text.delta","delta":"PRIVATE_SYNTHETIC_TEXT"}\n\n'

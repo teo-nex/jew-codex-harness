@@ -12,15 +12,18 @@ try:
     from .reasoning_effort import validate_reasoning_profiles
     from .project_policy import validate_project_fields
     from .request_budget import validate_budget
+    from .routing_policy import TIERS
 except ImportError:  # launched as a script from server/
     from portable_lock import locked_file
     from reasoning_effort import validate_reasoning_profiles
     from project_policy import validate_project_fields
     from request_budget import validate_budget
+    from routing_policy import TIERS
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-NATIVE_MODELS = ("gpt-6-luna", "gpt-5.6-terra", "gpt-6-sol", "gpt-6-astra")
+REQUIRED_NATIVE_MODELS = ("gpt-6-luna", "gpt-5.6-terra", "gpt-6-sol", "gpt-6-astra")
+NATIVE_MODELS = TIERS
 
 
 def validate_ordered_config(value):
@@ -51,9 +54,9 @@ def validate_ordered_config(value):
         if "model" in provider and (not isinstance(model, str) or not model.strip() or model != model.strip()):
             raise ValueError("Provider model must be an exact non-empty model ID")
         if "models" in provider:
-            if (not isinstance(models, dict) or set(models) != set(NATIVE_MODELS)
+            if (not isinstance(models, dict) or not set(REQUIRED_NATIVE_MODELS) <= set(models) <= set(NATIVE_MODELS)
                     or any(not isinstance(m, str) or not m.strip() or m != m.strip() for m in models.values())):
-                raise ValueError("Provider models must map every Jev native model to an exact model ID")
+                raise ValueError("Provider models must include all required native models and only known optional models")
         if model is None and models is None and transport != "native":
             raise ValueError("OmniRoute provider needs model or models")
         accounts = provider.get("connection_ids", [])
@@ -117,7 +120,7 @@ def validate_config(value):
 
 
 def plus_model(tier, effort):
-    if tier not in NATIVE_MODELS or effort not in EFFORTS:
+    if tier not in REQUIRED_NATIVE_MODELS or effort not in EFFORTS:
         raise ValueError("Invalid Plus model or reasoning effort")
     if tier == "gpt-6-astra":
         return tier
@@ -133,6 +136,18 @@ class Ladder:
         self.path = Path(state_path)
         self.path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self.lock = self.path.with_suffix(".lock")
+
+    def available_models(self):
+        """Optional tiers require a mapping on every mapped fallback provider.
+
+        Fixed routes explicitly replace any selected tier; unmapped native
+        routes preserve it. Legacy sequences keep their original model set.
+        """
+        if self.providers is None:
+            return REQUIRED_NATIVE_MODELS
+        return tuple(model for model in NATIVE_MODELS if all(
+            "models" not in provider or model in provider["models"]
+            for provider in self.providers))
 
     def _load(self):
         try:
@@ -346,8 +361,8 @@ class Ladder:
                     for reason in (None, "model_unavailable")), default=0)
 
     def _ordered_route(self, scope, tier, effort, recover_primary):
-        if tier not in NATIVE_MODELS or effort not in EFFORTS:
-            raise ValueError("Invalid Jev model or reasoning effort")
+        if tier not in self.available_models() or effort not in EFFORTS:
+            raise ValueError("Invalid or unconfigured Jev model or reasoning effort")
         def operation(state):
             thread = state.get(scope)
             if not isinstance(thread, dict) or thread.get("config_hash") != self.fingerprint:

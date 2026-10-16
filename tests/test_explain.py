@@ -24,6 +24,18 @@ class ExplainTests(unittest.TestCase):
             path.write_text('{"model":"fixture","attempts":null}\n')
             self.assertEqual(explain.latest(root)["attempts"], [])
 
+    def test_jev_diagnostic_codes_are_included_without_raw_failure_data(self):
+        with tempfile.TemporaryDirectory() as root:
+            path = Path(root) / "codex-router/jev-router-live.jsonl"
+            path.parent.mkdir()
+            details = {"jev_error_stage":"transport", "jev_error_reason":"http_error",
+                       "jev_error_http_status":429, "jev_error_field":None}
+            path.write_text(json.dumps({"model":"fixture", **details,
+                "exception":"private-key", "provider_body":"private-prompt", "traceback":"private-trace"}) + "\n")
+            report = explain.latest(root)
+            self.assertEqual({k:report[k] for k in details}, details)
+            self.assertNotIn("private", json.dumps(report))
+
     def test_missing_log_does_not_create_profile(self):
         with tempfile.TemporaryDirectory() as root:
             self.assertFalse(explain.latest(Path(root) / "absent")["found"])
