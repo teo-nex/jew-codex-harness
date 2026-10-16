@@ -228,6 +228,10 @@ def _run_task(task_id):
     home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
     config_path = home / "config.toml"
     config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    # Without an implementation selected, native Windows exec can silently
+    # reduce workspace-write to read-only. Never replace a configured mode.
+    if sys.platform == "win32" and not config.get("windows", {}).get("sandbox"):
+        command.extend(["-c", 'windows.sandbox="unelevated"'])
     for section in ("mcp_servers", "plugins"):
         for name in config.get(section, {}):
             command.extend(["-c", section + "." + json.dumps(name) + ".enabled=false"])

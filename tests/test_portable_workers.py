@@ -114,6 +114,21 @@ class PortableWorkersTest(unittest.TestCase):
             portable._run(task_id)
         self.assertEqual(portable.status(task_id)["reason"], "worker_guard_not_observed")
 
+    def test_windows_sandbox_default_does_not_replace_configured_mode(self):
+        for configured in (None, "elevated", "unelevated", "mxc"):
+            with self.subTest(configured=configured):
+                config = "" if configured is None else '[windows]\nsandbox = "' + configured + '"\n'
+                (self.home / "config.toml").write_text(config, encoding="utf-8")
+                with mock.patch.object(portable.shutil, "which", return_value="/fake/codex"), \
+                     mock.patch.object(portable.subprocess, "Popen") as launch:
+                    task_id = portable.submit({**self.task, "request_id": str(configured)})["task_id"]
+                    launch.return_value.poll.return_value = 0
+                    launch.return_value.returncode = 0
+                    with mock.patch.object(portable.sys, "platform", "win32"):
+                        portable._run(task_id)
+                    command = launch.call_args.args[0]
+                self.assertEqual('windows.sandbox="unelevated"' in command, configured is None)
+
     def test_failed_tools_denied_checks_and_failing_checks_cannot_complete(self):
         for case, expected in (("tool", "worker_tool_failed"), ("denied", "acceptance_denied_by_jev"),
                                ("check", "acceptance_failed")):

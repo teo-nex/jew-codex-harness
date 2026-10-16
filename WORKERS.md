@@ -11,6 +11,13 @@ Linux requires a host that permits Codex's Bubblewrap/user namespaces. The
 ephemeral Ubuntu CI runner explicitly enables that prerequisite; the installer
 does not change host kernel or AppArmor policy. A sandbox startup failure is
 not a reason to disable the worker sandbox.
+Native Windows preserves the configured `windows.sandbox` implementation.
+If none is configured, the worker invocation explicitly selects `unelevated`
+to avoid Codex silently reducing workspace-write to read-only. This restricted
+token fallback has weaker network isolation than `elevated`; provision and
+configure `elevated` (or supported `mxc`) for stronger OS isolation. Managed
+Codex requirements still apply; the worker never bypasses them or provisions
+administrator accounts. See the [native Windows sandbox documentation](https://developers.openai.com/codex/windows/).
 
 Pass `request_id`, `goal`, an absolute `cwd`, and explicit relative
 `allowed_files`. An existing directory grants ownership of its descendants;
