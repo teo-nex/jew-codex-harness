@@ -1,6 +1,6 @@
 """Fresh real Codex client against owned synthetic loopback faults, never live providers."""
 
-from contextlib import ExitStack
+from contextlib import ExitStack, nullcontext
 import hashlib
 import json
 import os
@@ -89,6 +89,21 @@ def response_stream():
                     for i, e in enumerate(events))
 
 
+def fixture_directory(*, platform=None, environ=None):
+    """Disposable Windows CI owns profile disposal; never reset Codex ACLs.
+
+    Windows clients can leave protected profile files after the owned process
+    exits. Match install-smoke: retain only on a GitHub-hosted disposable VM,
+    with strict TemporaryDirectory cleanup everywhere else.
+    """
+    platform = os.name if platform is None else platform
+    environ = os.environ if environ is None else environ
+    if (platform == "nt" and environ.get("GITHUB_ACTIONS", "").lower() == "true"
+            and environ.get("RUNNER_ENVIRONMENT", "").lower() == "github-hosted"):
+        return nullcontext(tempfile.mkdtemp(prefix="jev-recovery-acceptance-")), "runner_disposal"
+    return tempfile.TemporaryDirectory(prefix="jev-recovery-acceptance-"), "strict"
+
+
 def run(executable=None):
     codex = executable or shutil.which("codex")
     if not codex:
@@ -114,7 +129,8 @@ def run(executable=None):
             self.end_headers()
             self.wfile.write(data)
     try:
-        with tempfile.TemporaryDirectory(prefix="jev-recovery-acceptance-") as directory, ExitStack() as stack:
+        temporary, cleanup_policy = fixture_directory()
+        with temporary as directory, ExitStack() as stack:
             root = Path(directory)
             home, work, state = root / "profile", root / "work", root / "state"
             for path in (home, work, state):
@@ -191,7 +207,7 @@ def run(executable=None):
                   and attempts[-1].get("terminal_type") == "response.completed")
             stage = "cleanup"
             return {"ok": ok, "status": "passed" if ok else "failed", "fresh_client": True,
-                    "client_exit_code": completed.returncode,
+                    "client_exit_code": completed.returncode, "cleanup_policy": cleanup_policy,
                     "provider_requests": len(requests), "attempt_statuses": [a.get("http_status") for a in attempts],
                     "marker_accepted": terminal and "\n".join(texts).strip() == MARKER,
                     "fresh_client_scope_correlated": scope_correlated,
