@@ -105,15 +105,19 @@ def run_case(kind, executable, catalog):
                                                "cwd": str(cwd), "allowed_files": ["owned.txt"],
                                                "budget": {"max_seconds": 60}})["task_id"]
                 real_popen = subprocess.Popen
-                stderr = root / "client-stderr.log"
                 def launch(command, **kwargs):
                     # Only this isolated fixture trusts its generated, reviewed
                     # hooks automatically. Production workers never bypass trust.
                     command = [*command[:-1], "--dangerously-bypass-hook-trust", command[-1]]
-                    with stderr.open("wb") as output:
-                        return real_popen(command, **{**kwargs, "stderr": output})
-                with mock.patch.object(portable.subprocess, "Popen", side_effect=launch):
-                    portable._run(task_id)
+                    return real_popen(command, **{**kwargs, "stderr": stderr})
+                # A Windows helper can briefly retain an inherited stderr
+                # handle after Codex exits. Anonymous capture avoids locking
+                # the fixture directory while preserving the actual result.
+                with tempfile.TemporaryFile() as stderr:
+                    with mock.patch.object(portable.subprocess, "Popen", side_effect=launch):
+                        portable._run(task_id)
+                    stderr.seek(0)
+                    client_stderr = stderr.read().decode("utf-8", errors="replace")
                 result = portable.collect(task_id)
                 edited = (cwd / "owned.txt").exists()
                 escaped = (cwd / "outside.txt").exists()
@@ -132,7 +136,7 @@ def run_case(kind, executable, catalog):
                         "client_requests": len(requests), "jev_reviews": len(reviews),
                         "guard_observed": result.get("guard_observed", False),
                         **diagnostic,
-                        **({"client_error": stderr.read_text(encoding="utf-8", errors="replace")[-2000:],
+                        **({"client_error": client_stderr[-2000:],
                             "client_events": (state / task_id / "events.jsonl").read_text(encoding="utf-8", errors="replace")[-3000:]} if not success else {})}
     finally:
         server.shutdown(); server.server_close(); thread.join(2)
