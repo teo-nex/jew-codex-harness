@@ -28,10 +28,14 @@ three OSes; see [worker permissions](../WORKERS.md) for the enforced boundaries
 and the distinction between task checks and worker tools. CanvasTTY and its
 macOS browser broker are optional; portable coding does not require them.
 
-The portable ownership change passed the local Python harness suite. A fresh
-macOS CLI with synthetic loopback responses loaded the hook and blocked both
-an out-of-ownership patch and a Jev-denied patch. Its authorized patch reached
-the native patch tool but failed to write in the current isolated environment;
-the runner correctly returned `worker_tool_failed`. Positive native writing
-and the new hosted Linux/Windows client checks remain pending. No live provider
-or installed-profile acceptance is claimed by these source changes.
+The hosted worker-client matrix uses the actual Codex CLI with an isolated
+profile, synthetic loopback model responses and synthetic Jev decisions. It
+requires a real owned UTF-8 edit and patch artifact, plus rejection of both an
+out-of-ownership patch and a Jev-denied patch. Consult the
+[workflow results](https://github.com/teo-nex/jew-codex-harness/actions/workflows/ci.yml)
+for the tested revision and OS results; configuring a job is not a passed run.
+The fixture alone bypasses trust for its generated hook file; production
+workers require reviewed hooks. A macOS CanvasTTY session cannot start a
+nested Seatbelt sandbox, so it retains the native CanvasTTY worker backend.
+No live provider or installed-profile acceptance is claimed by source or
+synthetic client checks.
