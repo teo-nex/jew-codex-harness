@@ -14,6 +14,7 @@ as verified, blocked, unsupported or untested on the target host.
 | Background service | launchd adapter, mocked tests | systemd user adapter, mocked tests | Task Scheduler adapter, mocked tests |
 | Global Codex hook/context | Packaged; fresh profile loading pending | Packaged; real loading pending | Packaged; ACL and real loading pending |
 | `jev-workers` | Guarded coding CLI; optional CanvasTTY | Guarded coding CLI | Guarded coding CLI |
+| Optional idle compact controller | Native synthetic CLI lifecycle tested locally; desktop integration not enabled | Portable controller; hosted native result in CI | Portable controller; hosted native result in CI |
 | CanvasTTY browser broker | Optional when helper exists | Unavailable | Unavailable |
 | Hosted fresh-profile install smoke (synthetic key; no live provider) | Passed in CI | Passed in CI | Passed in CI |
 | Live first install with owner credentials and completed model response | Pending | Pending | Pending |
@@ -39,3 +40,8 @@ workers require reviewed hooks. A macOS CanvasTTY session cannot start a
 nested Seatbelt sandbox, so it retains the native CanvasTTY worker backend.
 No live provider or installed-profile acceptance is claimed by source or
 synthetic client checks.
+
+[Idle compaction](IDLE-COMPACT.md) requires its managed launcher. Native fixtures
+use a shortened timer and synthetic responses; check the revision's CI results
+before claiming hosted OS acceptance. Existing desktop/CanvasTTY sessions and
+ordinary unwrapped CLI sessions do not gain an idle timer from installation.

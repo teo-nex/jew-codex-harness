@@ -107,6 +107,9 @@ separate checks in a client that exposes those capabilities.
 - Coding workers through the Codex CLI on macOS, Linux and Windows, with
   explicit `allowed_files`, deterministic write guards and Jev patch review.
   CanvasTTY is not required. See [worker permissions](WORKERS.md).
+- An optional [30-minute idle compaction launcher](docs/IDLE-COMPACT.md) for
+  managed Codex CLI or configurable stdio clients, independent of model choice.
+  It does not attach to existing desktop chats or replace their launchers.
 - A 24-hour API-price comparison after real routed work. It estimates what the
   observed tokens would cost at listed API prices; it does not measure money
   paid, subscription savings, or equal task quality.
