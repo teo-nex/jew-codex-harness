@@ -115,7 +115,11 @@ class GlobalHookContractTests(unittest.TestCase):
         context = result["hookSpecificOutput"]["additionalContext"]
         self.assertIn("CanvasTTY owns all Tool Use permissions", context)
         self.assertIn("Jev only selects the model", context)
-        self.assertIn("discover missing tools once", context)
+        self.assertIn("one exact unqualified tool name", context)
+        self.assertIn("using its default limit", context)
+        self.assertIn("one server-name-only discovery query", context)
+        self.assertIn("do not repeat refused tool calls", context)
+        self.assertNotIn("discover missing tools once", context)
         self.assertIn("workers with model=jev/auto independently", context)
         self.assertIn("no duplicate get_agent_result", context)
         self.assertIn("session IDs belong only to canvastty_agents", context)
@@ -136,12 +140,17 @@ class GlobalHookContractTests(unittest.TestCase):
         self.assertEqual(self.hook._read(self.hook.state_file(self.session))["permission_owner"], "canvastty")
 
     def test_existing_native_session_receives_updated_workflow_once(self):
-        self.hook.update_state(self.session, lambda saved: saved.update(permission_owner="canvastty", tool_mode="jev_auto", canvastty_workflow_version=3))
-        with mock.patch.dict(os.environ, CANVASTTY_ENV):
-            first = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})
-            second = self.hook.prompt({"session_id": self.session, "model": "jev/auto", "prompt": "Continue"})
-        self.assertIn("discover missing tools once", first["hookSpecificOutput"]["additionalContext"])
-        self.assertIsNone(second)
+        for model, mode in (("jev/auto", "jev_auto"), ("gpt-6.1-sol", "manual")):
+            with self.subTest(model=model):
+                self.hook.update_state(self.session, lambda saved: saved.update(
+                    permission_owner="canvastty", tool_mode=mode, canvastty_workflow_version=4))
+                with mock.patch.dict(os.environ, CANVASTTY_ENV), \
+                     mock.patch.object(self.hook, "ask_jev") as ask:
+                    first = self.hook.prompt({"session_id": self.session, "model": model, "prompt": "Continue"})
+                    second = self.hook.prompt({"session_id": self.session, "model": model, "prompt": "Continue"})
+                self.assertIn("one exact unqualified tool name", first["hookSpecificOutput"]["additionalContext"])
+                self.assertIsNone(second)
+                ask.assert_not_called()
 
     def test_native_prompt_does_not_consume_the_standalone_auxiliary_notice(self):
         with mock.patch.dict(os.environ, CANVASTTY_ENV):
