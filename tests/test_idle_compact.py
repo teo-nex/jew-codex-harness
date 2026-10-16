@@ -220,6 +220,10 @@ class IdleCompactTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.c.threads["t"].armed)
         self.assertEqual(self.events[-1]["event"], "compact_preflight_unavailable")
 
+    async def test_late_internal_response_never_leaks_into_client_protocol(self):
+        await self.c.server({"id": "jev-idle-expired", "result": {"data": []}})
+        self.assertFalse(self.down)
+
     async def test_unrelated_turn_cannot_release_compaction_gate(self):
         self.hold, self.now = True, 1800
         task = asyncio.create_task(self.c.tick())

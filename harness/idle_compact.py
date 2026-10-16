@@ -107,9 +107,10 @@ class Controller:
 
     async def server(self, message):
         method, params = message.get("method"), message.get("params") or {}
-        if not method and message.get("id") in self.internal:
-            future = self.internal.pop(message["id"])
-            if not future.done():
+        if (not method and isinstance(message.get("id"), str)
+                and message["id"].startswith("jev-idle-")):
+            future = self.internal.pop(message["id"], None)
+            if future is not None and not future.done():
                 if "error" in message:
                     future.set_exception(RPCRejected("idle_compact_rpc_rejected"))
                 else:
@@ -339,12 +340,14 @@ async def relay(receive, send, *, executable, codex_args=(), idle_seconds=DEFAUL
 
 async def stdio(args, executable):
     loop = asyncio.get_running_loop()
-    queue = asyncio.Queue(maxsize=256)
+    queue = asyncio.Queue(maxsize=1)
     def reader():
         try:
-            for line in sys.stdin.buffer:
+            while line := sys.stdin.buffer.readline(MAX_MESSAGE + 1):
                 future = asyncio.run_coroutine_threadsafe(queue.put(line), loop)
                 future.result()
+                if len(line) > MAX_MESSAGE:
+                    break
         finally:
             with suppress(RuntimeError):
                 asyncio.run_coroutine_threadsafe(queue.put(None), loop)
