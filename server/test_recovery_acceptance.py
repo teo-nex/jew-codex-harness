@@ -84,7 +84,9 @@ class RecoveryAcceptanceTests(unittest.TestCase):
                 self.assertTrue(stopped, "servers must stop before their files are removed")
                 return inner.directory.__exit__(*args)
 
-        with mock.patch.object(recovery.tempfile, "TemporaryDirectory", Directory), \
+        # This case verifies strict cleanup independently of the CI host policy.
+        with mock.patch.dict(recovery.os.environ, {"RUNNER_ENVIRONMENT": "self-hosted"}), \
+             mock.patch.object(recovery.tempfile, "TemporaryDirectory", Directory), \
              mock.patch.object(recovery, "close_servers", side_effect=close), \
              mock.patch.object(recovery, "run_bounded", return_value=mock.Mock(returncode=1, stdout="")):
             report = recovery.run("fixture-codex")
