@@ -100,7 +100,8 @@ from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL
                             TIERS, automatic_models, workhorse, decision_from_answers, questions_for_models, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
-from request_budget import RequestBudget, AttemptClock, BudgetExceeded
+from request_budget import RequestBudget, AttemptClock, BudgetExceeded, ClientDisconnected, ExhaustedRequests
+from validated_stream import ValidatedStream
 from provider_failure import classify_failure
 from reasoning_effort import resolve_model_reasoning_effort
 
@@ -221,6 +222,7 @@ _cache_affinity_lock = threading.Lock()
 _cache_affinity = {}
 _route_lease_lock = threading.Lock()
 _route_leases = {}
+_exhausted_requests = ExhaustedRequests()
 
 # Codex wraps every turn in machine-generated blocks (goal context, plugin
 # catalog, environment, skills, mode notices). They are the longest part of a
@@ -2112,6 +2114,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _json(self, code, obj):
+        relay = getattr(self, "_validated_stream", None)
+        if relay:
+            relay.fail("The configured route could not complete this response.")
+            return
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -2171,6 +2177,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.close_connection = True
         self._response_started = False
+        self._validated_stream = None
         try:
             secret = local_secret()
             if not secret:
@@ -2189,6 +2196,21 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(502, {"error": {"message": "local router request failed"}})
             except Exception:
                 pass
+        finally:
+            relay = getattr(self, "_validated_stream", None)
+            if relay and not relay.finished:
+                try:
+                    relay.fail("The response could not be completed.")
+                except OSError:
+                    pass
+
+    def _admit_replay(self, payload):
+        self._replay_key = _exhausted_requests.key({"request": payload, "limits": self._budget.limits})
+        if _exhausted_requests.contains(self._replay_key):
+            self._json(400, {"error": {"type": "invalid_request_error", "code": "request_budget_exhausted",
+                                      "message": "Request budget exhausted; this exact request cannot be replayed. Start a new turn or adjust request_budget."}})
+            return False
+        return True
 
     def _post(self):
         path = self.path.split("?", 1)[0]
@@ -2234,6 +2256,8 @@ class Handler(BaseHTTPRequestHandler):
         affinity = cache_affinity(scope, payload)
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
+        if not self._admit_replay(payload):
+            return
         available_models = self._policy_ladder.available_models() if self._policy_ladder else TIERS
         models = automatic_models(available_models)
         fixed_model = payload.get("model") if payload.get("model") in TIERS else None
@@ -2397,7 +2421,18 @@ class Handler(BaseHTTPRequestHandler):
             status, out_kind, ctype, quota_hit, unwritten, _resets_at = self._forward(
                 payload, out_path, stream_requested, debug, marker, model, signature, effort,
                 exact_route=True)
+        exhausted = any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts)
+        if exhausted:
+            _exhausted_requests.remember(getattr(self, "_replay_key", None))
+        if unwritten is not None and getattr(self, "_validated_stream", None):
+            self._validated_stream.fail("Request budget exhausted; start a new turn or adjust request_budget."
+                                        if exhausted else "Configured provider routes could not complete this response.",
+                                        "request_budget_exhausted" if exhausted else "upstream_response_failed")
+            unwritten = None
         if unwritten is not None:
+            if any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts):
+                status, ctype = 400, "application/json"
+                unwritten = b'{"error":{"type":"invalid_request_error","code":"request_budget_exhausted","message":"Request budget exhausted; start a new request or adjust request_budget."}}'
             # Every model that could have served this turn refused it, and the
             # refusal was held back only because another attempt might have
             # followed. None did, so the caller gets the refusal instead of a
@@ -2613,6 +2648,7 @@ class Handler(BaseHTTPRequestHandler):
                 # routes use explicit bad-request classification instead.
                 failure = {"class": "unavailable", "cooldown_seconds": 30, "retryable": True}
             attempt["failure_class"] = failure["class"]
+            remember_route_lease(scope, payload, step, decision, status if status != 200 else 502)
             if (ladder.providers is None and status == 400 and not quota_hit
                     and chosen["stage"] in ("gemini", "opus", "wally")):
                 # This request shape failed before generation. Trying every
@@ -2650,6 +2686,19 @@ class Handler(BaseHTTPRequestHandler):
                   "jev_ms": jev_ms,
                   "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                   "status": status, "cache_scope": scope, "stream": stream_requested})
+        remember_route_lease(scope, payload, step, decision, status)
+        exhausted = any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts)
+        if exhausted:
+            _exhausted_requests.remember(getattr(self, "_replay_key", None))
+        relay = getattr(self, "_validated_stream", None)
+        if relay:
+            relay.fail("Request budget exhausted; start a new request or adjust request_budget."
+                       if exhausted else "Configured provider routes could not complete this response.",
+                       "request_budget_exhausted" if exhausted else "upstream_response_failed")
+            return
+        if exhausted:
+            status, ctype = 400, "application/json"
+            body = b'{"error":{"type":"invalid_request_error","code":"request_budget_exhausted","message":"Request budget exhausted; start a new request or adjust request_budget."}}'
         self.send_response(status)
         self.send_header("Content-Type", ctype or "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -2687,7 +2736,11 @@ class Handler(BaseHTTPRequestHandler):
             self._attempts.append({"model": model, "status": 504, "timeout_phase": exc.phase,
                                    "completion": "budget_exhausted", "usage": None})
             return 504, "json", "application/json", False, b'{"error":{"message":"request budget exhausted"}}', None
-        clock = AttemptClock(budget)
+        def keep_alive():
+            relay = getattr(self, "_validated_stream", None)
+            if relay:
+                relay.heartbeat()
+        clock = AttemptClock(budget, getattr(self, "connection", None), keep_alive)
         body = json.dumps(wire_payload).encode("utf-8")
         conn = http.client.HTTPConnection(
             external["host"], external["port"], timeout=clock.timeout()
@@ -2780,12 +2833,18 @@ class Handler(BaseHTTPRequestHandler):
                 and tool.get("execution") == "client" for tool in payload.get("tools", [])
             ))
 
-            if is_sse and stream_requested and external:
+            if is_sse and stream_requested and (external or getattr(self, "_validated_stream", None)):
                 out_kind = "sse"
                 # Validate the complete external stream before exposing any
                 # content or tool call. Some upstreams append response.completed
                 # after an error event; forwarding that stream prevents safe
                 # provider fallback and LiteLLM rejects it mid-stream.
+                # Announce a lifecycle-only envelope before buffering. No text,
+                # reasoning or tool action is exposed until validation succeeds.
+                # Downstream proxies must not time out waiting for headers or
+                # multiply their own retries while generation is still active.
+                if not getattr(self, "_validated_stream", None):
+                    self._validated_stream = ValidatedStream(self, model)
                 raw = read_body()
                 if len(raw) <= 8 * 1024 * 1024:
                     from provider_output import normalize_sparse_output_indices
@@ -2823,11 +2882,7 @@ class Handler(BaseHTTPRequestHandler):
                     if reason:
                         attempt["completion"] = "invalid_response:" + reason
                         return 502, "json", "application/json", False, b'{"error":{"message":"external route returned invalid Responses output"}}', None
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                self._validated_stream.finish(data)
                 return 200, out_kind, ctype, False, None, None
 
             if is_sse and stream_requested:
@@ -2989,7 +3044,12 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, http.client.HTTPException) as exc:
             if isinstance(exc, TimeoutError) or clock.expired:
                 attempt["timeout_phase"] = clock.failure_phase(exc)
-            if self._response_started:
+            if clock.disconnected or isinstance(exc, ClientDisconnected):
+                attempt["completion"] = "client_disconnected"
+                attempt["transport_error"] = "downstream_client_disconnected"
+                status = 499
+                return status, out_kind or "sse", ctype, False, None, None
+            if self._response_started and not getattr(self, "_validated_stream", None):
                 attempt["completion"] = "transport_failed"
                 attempt["transport_error"] = "upstream_transport_unavailable"
                 return status or 502, out_kind or "sse", ctype, False, None, None

@@ -1,13 +1,17 @@
 """Monotonic request deadlines and interruptible upstream socket waits."""
 
 import math
+import hashlib
+import json
+from collections import OrderedDict
 import socket
+import select
 import threading
 import time
 
 
 DEFAULTS = {"connect_seconds": 15, "first_token_seconds": 60, "idle_seconds": 30,
-            "total_seconds": 180, "max_attempts": 8}
+            "total_seconds": 600, "max_attempts": 8}
 
 
 def validate_budget(value):
@@ -29,6 +33,10 @@ class BudgetExceeded(TimeoutError):
         super().__init__("request budget exhausted: " + phase)
 
 
+class ClientDisconnected(ConnectionError):
+    pass
+
+
 class RequestBudget:
     def __init__(self, limits=None, started=None):
         self.limits = validate_budget(limits or {})
@@ -48,8 +56,11 @@ class RequestBudget:
 
 
 class AttemptClock:
-    def __init__(self, budget):
+    def __init__(self, budget, client_socket=None, on_wait=None):
         self.budget = budget
+        self.client_socket = client_socket
+        self.on_wait = on_wait
+        self.disconnected = False
         self.socket = None
         self.timer = None
         self.phase = "connect"
@@ -59,6 +70,8 @@ class AttemptClock:
         self.closed = False
 
     def timeout(self):
+        if self.disconnected:
+            raise ClientDisconnected("downstream client disconnected")
         now = time.monotonic()
         if now >= self.budget.deadline:
             raise BudgetExceeded("total")
@@ -66,13 +79,27 @@ class AttemptClock:
             raise BudgetExceeded(self.expired or self.phase)
         return max(0.001, min(self.budget.deadline, self.phase_deadline) - now)
 
+    def _check_client(self):
+        if self.client_socket is not None:
+            try:
+                readable, _, _ = select.select([self.client_socket], [], [], 0)
+                if readable and not self.client_socket.recv(1, socket.MSG_PEEK):
+                    self.disconnected = True
+                if not self.disconnected and self.on_wait:
+                    self.on_wait()
+            except (OSError, ValueError):
+                self.disconnected = True
+
     def _interrupt(self):
         with self.lock:
             if self.closed:
                 return
-            if time.monotonic() < min(self.budget.deadline, self.phase_deadline):
+            self._check_client()
+            if not self.disconnected and time.monotonic() < min(self.budget.deadline, self.phase_deadline):
+                self._arm()
                 return
-            self.expired = "total" if time.monotonic() >= self.budget.deadline else self.phase
+            if not self.disconnected:
+                self.expired = "total" if time.monotonic() >= self.budget.deadline else self.phase
             if self.socket is not None:
                 try:
                     self.socket.shutdown(socket.SHUT_RDWR)
@@ -82,7 +109,7 @@ class AttemptClock:
     def _arm(self):
         if self.timer:
             self.timer.cancel()
-        self.timer = threading.Timer(self.timeout(), self._interrupt)
+        self.timer = threading.Timer(min(self.timeout(), 0.25) if self.client_socket is not None else self.timeout(), self._interrupt)
         self.timer.daemon = True
         self.timer.start()
 
@@ -95,6 +122,7 @@ class AttemptClock:
 
     def before_read(self):
         with self.lock:
+            self._check_client()
             timeout = self.timeout()
             if self.socket is not None:
                 self.socket.settimeout(timeout)
@@ -117,3 +145,36 @@ class AttemptClock:
         return (getattr(exc, "phase", None) or
                 ("total" if not self.budget.remaining() else self.expired or
                  ("total" if self.budget.deadline <= self.phase_deadline else self.phase)))
+
+
+class ExhaustedRequests:
+    """Bounded, private fingerprints stop proxy/client retries renewing a spent budget.
+
+    A new turn, changed input, model or routing options has a different identity.
+    Only exhausted calls are remembered; provider health is never affected.
+    """
+    def __init__(self, ttl=900, capacity=256):
+        self.ttl = ttl
+        self.capacity = capacity
+        self.entries = OrderedDict()
+        self.lock = threading.Lock()
+
+    @staticmethod
+    def key(payload):
+        return hashlib.sha256(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()).digest()
+
+    def contains(self, key):
+        now = time.monotonic()
+        with self.lock:
+            while self.entries and next(iter(self.entries.values())) <= now:
+                self.entries.popitem(last=False)
+            return key in self.entries
+
+    def remember(self, key):
+        if key is None:
+            return
+        with self.lock:
+            self.entries.pop(key, None)
+            self.entries[key] = time.monotonic() + self.ttl
+            while len(self.entries) > self.capacity:
+                self.entries.popitem(last=False)

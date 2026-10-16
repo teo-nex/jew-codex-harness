@@ -69,7 +69,7 @@ class BudgetTests(unittest.TestCase):
         self.assertEqual(result[0], 504)
         self.assertIsNotNone(result[4])
         self.assertEqual(handler._attempts[-1]["timeout_phase"], mode)
-        self.assertEqual(handler.wfile.getvalue(), b"")
+        self.assertNotIn(b'"delta"', handler.wfile.getvalue())
         self.assertLess(time.monotonic() - started, 3)
 
     def test_first_token_not_reset_by_lifecycle_heartbeats(self):

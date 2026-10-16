@@ -154,12 +154,23 @@ flags cannot bypass configured project restrictions. These policies apply to
 ## Request budgets
 
 Optional `request_budget` (version 2 and legacy) sets `connect_seconds` (15),
-`first_token_seconds` (60), `idle_seconds` (30), `total_seconds` (180), and
+`first_token_seconds` (60), `idle_seconds` (30), `total_seconds` (600), and
 `max_attempts` (8). Seconds are finite 0.05-900, attempts 1-1024. The adapter's
 defaults also apply without an external ladder. The monotonic total deadline
 includes classification time and all relay attempts; it never resets on retry.
 The existing Jev classifier has its own bounded 4-second call (capped by the
 remaining budget). Relay socket waits are interrupted even for an active stream.
+External SSE starts with a relay-owned lifecycle envelope and keepalives while
+content and tool calls remain buffered for validation. Slow reasoning therefore
+does not look like an upstream that never sent headers. Disconnecting the caller
+interrupts the upstream socket instead of leaving generation running in the
+background. The default total budget allows longer reasoning turns; explicit
+configured budgets are still hard limits. Exhausting the total/attempt budget
+is terminal, not a retryable provider outage, and invalidates the route lease.
+A bounded in-memory cache of request hashes rejects exact exhausted replays for
+15 minutes, including retries issued by another proxy layer. No prompts are
+stored. New turns/changed requests remain independent, and service restart
+clears this cache.
 SSE lifecycle heartbeats do not count as a first token. For non-stream JSON,
 first bytes are the observable boundary; token timing remains unknown.
 

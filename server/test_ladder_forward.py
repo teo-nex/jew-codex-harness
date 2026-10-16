@@ -122,7 +122,10 @@ class LadderForwardTests(unittest.TestCase):
                   "port": 20128, "key": "synthetic", "account": "plus-id"})
         self.assertEqual(status, 502)
         self.assertIsNotNone(unwritten)
-        self.assertEqual(handler.wfile.getvalue(), b"")
+        # A lifecycle envelope keeps proxies alive, but invalid content and
+        # terminal events are still held back for safe fallback.
+        self.assertIn(b"response.created", handler.wfile.getvalue())
+        self.assertNotIn(b"response.completed", handler.wfile.getvalue())
 
     def test_nonstream_external_error_before_completion_stays_unwritten(self):
         body = (b'event: error\n'
