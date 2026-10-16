@@ -2,7 +2,10 @@
 import math
 import os
 
-from jev_errors import JevDecisionError
+try:
+    from .jev_errors import JevDecisionError
+except ImportError:  # launched directly from server/
+    from jev_errors import JevDecisionError
 
 POLICY_VERSION = "split-v14-bounded-routing"
 LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
