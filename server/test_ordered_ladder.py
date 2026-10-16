@@ -25,6 +25,17 @@ class OrderedLadderTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.path = Path(temporary.name) / "state.json"
 
+    def test_tool_search_capability_requires_an_explicit_boolean(self):
+        for invalid in (None, 0, 1, "true", [], {}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                validate_config({"providers": [{"id": "external", "model": "gateway/model",
+                                              "supports_tool_search_history": invalid}]})
+        for enabled in (False, True):
+            config = {"providers": [{"id": "external", "model": "gateway/model",
+                                     "supports_tool_search_history": enabled}]}
+            route = Ladder(config, self.path).route("scope", "gpt-6-sol", "high")
+            self.assertIs(route["supports_tool_search_history"], enabled)
+
     def test_custom_order_needs_no_plus_or_gemini_and_accounts_are_sticky(self):
         ladder = Ladder(CONFIG, self.path)
         seen = []
@@ -206,6 +217,32 @@ class OrderedForwardTests(unittest.TestCase):
     def test_exposed_response_is_never_replayed(self):
         calls, _, _ = self._run(CONFIG, [(502, None)])
         self.assertEqual(len(calls), 1)
+
+    def test_capable_external_route_preserves_discovery_without_native(self):
+        for destination in ("gateway/model-a", "other/model-b"):
+            with self.subTest(destination=destination):
+                config = {"providers": [{"id": "external", "model": destination,
+                                         "supports_tool_search_history": True}]}
+                calls, handler, original = self._run(config, [(200, None)], tool_search=True)
+                self.assertEqual(len(calls), 1)
+                self.assertEqual(calls[0][0]["input"], original["input"])
+                self.assertEqual(calls[0][0]["model"], destination)
+                self.assertFalse(calls[0][1]["exact_route"])
+                self.assertIsNotNone(calls[0][1]["external"])
+                handler._json.assert_not_called()
+
+    def test_tool_search_capability_is_checked_on_each_fallback(self):
+        for fallback_capable in (False, True):
+            with self.subTest(fallback_capable=fallback_capable):
+                config = {"providers": [
+                    {"id": "first", "model": "gateway/model-a", "supports_tool_search_history": True},
+                    {"id": "second", "model": "gateway/model-b", "supports_tool_search_history": fallback_capable},
+                    {"id": "native", "transport": "native"}]}
+                calls, _, original = self._run(config, [(429, b"quota"), (200, None)], tool_search=True)
+                expected = "gateway/model-b" if fallback_capable else jev.SOL
+                self.assertEqual([p["model"] for p, _ in calls], ["gateway/model-a", expected])
+                self.assertEqual([p["input"] for p, _ in calls], [original["input"], original["input"]])
+                self.assertEqual(calls[1][1]["exact_route"], not fallback_capable)
 
     def test_tool_search_requires_explicit_native_provider(self):
         calls, handler, _ = self._run({"providers": [{"id": "only", "model": "a"}]}, [], tool_search=True)

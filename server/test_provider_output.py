@@ -78,8 +78,10 @@ class GonkaOutputTests(unittest.TestCase):
         bad = {"status": "completed", "output": [tool_call(), *answer("Invented tool result.")["output"]]}
         result, sent, body, attempt = self._forward(stream(bad))
         self.assertEqual(result[0], 502)
-        self.assertEqual(sent, [])
-        self.assertEqual(body, b"")
+        self.assertEqual(sent, [200])
+        self.assertIn(b"response.created", body)
+        self.assertNotIn(b"response.output_item", body)
+        self.assertNotIn(b"response.completed", body)
         self.assertIn("invalid_response", attempt["completion"])
 
     def test_reasoning_only_completed_stream_is_held_back(self):
@@ -87,8 +89,10 @@ class GonkaOutputTests(unittest.TestCase):
         bad = {"status": "completed", "output": [{"type": "reasoning", "id": "reason_1"}]}
         result, sent, body, attempt = self._forward(stream(bad))
         self.assertEqual(result[0], 502)
-        self.assertEqual(sent, [])
-        self.assertEqual(body, b"")
+        self.assertEqual(sent, [200])
+        self.assertIn(b"response.created", body)
+        self.assertNotIn(b"response.output_item", body)
+        self.assertNotIn(b"response.completed", body)
         self.assertIn("invalid_response", attempt["completion"])
 
     def test_clean_stream_reaches_codex_once(self):
@@ -107,8 +111,10 @@ class GonkaOutputTests(unittest.TestCase):
     def test_ambiguous_sparse_stream_is_held_back(self):
         result, sent, body, attempt = self._forward(SparseIndexTests().fixture(final_type="message"))
         self.assertEqual(result[0], 502)
-        self.assertEqual(sent, [])
-        self.assertEqual(body, b"")
+        self.assertEqual(sent, [200])
+        self.assertIn(b"response.created", body)
+        self.assertNotIn(b"response.output_item", body)
+        self.assertNotIn(b"response.completed", body)
         self.assertEqual(attempt["completion"], "sparse_index_ambiguous")
 
 

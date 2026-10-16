@@ -363,6 +363,38 @@ test("a tool-call turn is not empty and its terminal events survive", async () =
   assert.match(body, /response\.completed/);
 });
 
+test("client discovery calls count as content in item events and terminal snapshots", async () => {
+  const item = {
+    type: "tool_search_call", execution: "client", status: "completed",
+    id: "tsc_fixture", call_id: "call_fixture", arguments: { query: "diagnostic schema" },
+  };
+  for (const eventType of ["response.output_item.added", "response.output_item.done", "response.completed"]) {
+    const event = eventType === "response.completed"
+      ? { type: eventType, response: { output: [item] } }
+      : { type: eventType, output_index: 0, item };
+    const input = `event: ${eventType}\ndata: ${JSON.stringify(event)}\n\n`;
+    for (const chunkSize of [0, 1, 13]) {
+      const result = await runGuard(input, { chunkSize });
+      assert.equal(result.empty, false, `${eventType}, chunkSize=${chunkSize}`);
+      assert.equal(result.body, input);
+    }
+  }
+});
+
+test("server discovery and discovery results alone do not hide empty completions", async () => {
+  for (const item of [
+    { type: "tool_search_call", execution: "server", status: "completed" },
+    { type: "tool_search_output", execution: "client", tools: [] },
+    { type: "unknown_call", execution: "client" },
+  ]) {
+    const event = { type: "response.completed", response: { output: [item] } };
+    const input = `event: response.completed\ndata: ${JSON.stringify(event)}\n\n`;
+    const result = await runGuard(input);
+    assert.equal(result.empty, true);
+    assert.equal(result.body, "");
+  }
+});
+
 test("custom tool input events count as content", async () => {
   const input = [
     "event: response.custom_tool_call_input.delta",

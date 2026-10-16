@@ -100,7 +100,8 @@ from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
-from request_budget import RequestBudget, AttemptClock, BudgetExceeded
+from request_budget import RequestBudget, AttemptClock, BudgetExceeded, ClientDisconnected, ExhaustedRequests
+from validated_stream import ValidatedStream
 from provider_failure import classify_failure
 from reasoning_effort import resolve_model_reasoning_effort
 
@@ -218,6 +219,7 @@ _cache_affinity_lock = threading.Lock()
 _cache_affinity = {}
 _route_lease_lock = threading.Lock()
 _route_leases = {}
+_exhausted_requests = ExhaustedRequests()
 
 # Codex wraps every turn in machine-generated blocks (goal context, plugin
 # catalog, environment, skills, mode notices). They are the longest part of a
@@ -1426,13 +1428,63 @@ def apply_route_payload(payload, model, effort, original_reasoning, injected_upd
     return next_update, transport
 
 
-def omniroute_cannot_represent_tool_search_history(payload):
-    """OmniRoute's Chat Completions adapter rejects this Responses item."""
+def has_tool_search_history(payload):
+    """Client-executed discovery requires a route that preserves its history."""
     items = payload.get("input")
     return isinstance(items, list) and any(
         isinstance(item, dict) and item.get("type") == "tool_search_output"
         for item in items
     )
+
+
+def _tool_search_name_collision(tools):
+    pending = list(tools)
+    while pending:
+        tool = pending.pop()
+        if not isinstance(tool, dict):
+            continue
+        if (tool.get("name") == "tool_search" or isinstance(tool.get("function"), dict)
+                and tool["function"].get("name") == "tool_search"):
+            return True
+        if isinstance(tool.get("tools"), list):
+            pending.extend(tool["tools"])
+    return False
+
+
+def external_tool_search_payload(payload):
+    """Use a function wire declaration for client discovery on external routes.
+
+    The canonical history stays native: a compatible gateway must preserve it.
+    SummaryMarker restores the returned function calls to client discovery items.
+    """
+    tools = payload.get("tools")
+    if not isinstance(tools, list):
+        return payload
+    discovery = [tool for tool in tools if isinstance(tool, dict)
+                 and tool.get("type") == "tool_search" and tool.get("execution") == "client"]
+    if not discovery:
+        return payload
+    definitions = list(tools)
+    for item in payload.get("input", []) if isinstance(payload.get("input"), list) else []:
+        if isinstance(item, dict) and item.get("type") == "tool_search_output" and isinstance(item.get("tools"), list):
+            definitions.extend(item["tools"])
+    if len(discovery) != 1 or _tool_search_name_collision(definitions):
+        raise ValueError("Ambiguous client discovery tool name")
+    native = discovery[0]
+    function = {"type": "function", "name": "tool_search"}
+    function.update({key: native[key] for key in ("description", "parameters", "strict") if key in native})
+    routed = {**payload, "tools": [function if tool is native else tool for tool in tools]}
+    choice = payload.get("tool_choice")
+    if isinstance(choice, dict) and choice.get("type") == "tool_search":
+        routed["tool_choice"] = {"type": "function", "name": "tool_search"}
+    elif isinstance(choice, dict) and choice.get("type") == "allowed_tools" and isinstance(choice.get("tools"), list):
+        routed["tool_choice"] = {**choice, "tools": [
+            {"type": "function", "name": "tool_search"}
+            if isinstance(tool, dict) and tool.get("type") == "tool_search"
+            and tool.get("execution") in (None, "client") else tool
+            for tool in choice["tools"]
+        ]}
+    return routed
 
 
 class SummaryMarker:
@@ -2006,6 +2058,10 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def _json(self, code, obj):
+        relay = getattr(self, "_validated_stream", None)
+        if relay:
+            relay.fail("The configured route could not complete this response.")
+            return
         data = json.dumps(obj).encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", "application/json")
@@ -2065,6 +2121,7 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         self.close_connection = True
         self._response_started = False
+        self._validated_stream = None
         try:
             secret = local_secret()
             if not secret:
@@ -2083,6 +2140,21 @@ class Handler(BaseHTTPRequestHandler):
                     self._json(502, {"error": {"message": "local router request failed"}})
             except Exception:
                 pass
+        finally:
+            relay = getattr(self, "_validated_stream", None)
+            if relay and not relay.finished:
+                try:
+                    relay.fail("The response could not be completed.")
+                except OSError:
+                    pass
+
+    def _admit_replay(self, payload):
+        self._replay_key = _exhausted_requests.key({"request": payload, "limits": self._budget.limits})
+        if _exhausted_requests.contains(self._replay_key):
+            self._json(400, {"error": {"type": "invalid_request_error", "code": "request_budget_exhausted",
+                                      "message": "Request budget exhausted; this exact request cannot be replayed. Start a new turn or adjust request_budget."}})
+            return False
+        return True
 
     def _post(self):
         path = self.path.split("?", 1)[0]
@@ -2128,6 +2200,8 @@ class Handler(BaseHTTPRequestHandler):
         affinity = cache_affinity(scope, payload)
         self._budget = RequestBudget(self._policy_ladder.config.get("request_budget")
                                      if self._policy_ladder else None, started=request_started)
+        if not self._admit_replay(payload):
+            return
         leased = route_lease(scope, payload, step)
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
@@ -2277,7 +2351,18 @@ class Handler(BaseHTTPRequestHandler):
             status, out_kind, ctype, quota_hit, unwritten, _resets_at = self._forward(
                 payload, out_path, stream_requested, debug, marker, model, signature, effort,
                 exact_route=True)
+        exhausted = any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts)
+        if exhausted:
+            _exhausted_requests.remember(getattr(self, "_replay_key", None))
+        if unwritten is not None and getattr(self, "_validated_stream", None):
+            self._validated_stream.fail("Request budget exhausted; start a new turn or adjust request_budget."
+                                        if exhausted else "Configured provider routes could not complete this response.",
+                                        "request_budget_exhausted" if exhausted else "upstream_response_failed")
+            unwritten = None
         if unwritten is not None:
+            if any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts):
+                status, ctype = 400, "application/json"
+                unwritten = b'{"error":{"type":"invalid_request_error","code":"request_budget_exhausted","message":"Request budget exhausted; start a new request or adjust request_budget."}}'
             # Every model that could have served this turn refused it, and the
             # refusal was held back only because another attempt might have
             # followed. None did, so the caller gets the refusal instead of a
@@ -2394,13 +2479,23 @@ class Handler(BaseHTTPRequestHandler):
         self._attempts = []
         self._budget = getattr(self, "_budget", None) or RequestBudget(ladder.config.get("request_budget"))
         last_error = None
-        force_main_for_call = omniroute_cannot_represent_tool_search_history(payload)
+        needs_tool_search_history = has_tool_search_history(payload)
+        force_main_for_call = False
         for attempt_index in range(ladder.attempt_limit + 1):
             forced_native = force_main_for_call
             try:
                 chosen = (ladder.native_route(base_model, effort) if force_main_for_call
                           else ladder.route(scope, base_model, effort,
                                             recover_primary=attempt_index == 0))
+                if (chosen is not None and chosen["stage"] != "exhausted"
+                        and needs_tool_search_history
+                        and chosen.get("transport", "native" if chosen["stage"] == "main" else "omniroute") != "native"
+                        and not chosen.get("supports_tool_search_history", False)):
+                    # Capability is an explicit route declaration, not a model-
+                    # name heuristic. Incompatible routes keep the native-only
+                    # handoff without advancing their sticky provider state.
+                    chosen = ladder.native_route(base_model, effort)
+                    forced_native = True
             except (OSError, ValueError, RuntimeError) as exc:
                 return self._json(503, {"error": {"message": "provider ladder state unavailable",
                                                "type": type(exc).__name__}})
@@ -2474,6 +2569,7 @@ class Handler(BaseHTTPRequestHandler):
                           "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                           "status": status, "cache_scope": scope, "stream": stream_requested})
                 return
+            remember_route_lease(scope, payload, step, decision, status if status != 200 else 502)
             failure = classify_failure(status, quota_hit, unwritten, attempt)
             if (ladder.providers is None and status == 400 and not quota_hit
                     and chosen["stage"] in ("glm", "deepseek")):
@@ -2518,6 +2614,19 @@ class Handler(BaseHTTPRequestHandler):
                   "jev_ms": jev_ms,
                   "total_ms": int((time.time() - started_at) * 1000) if started_at else None,
                   "status": status, "cache_scope": scope, "stream": stream_requested})
+        remember_route_lease(scope, payload, step, decision, status)
+        exhausted = any(a.get("timeout_phase") in ("total", "max_attempts") for a in self._attempts)
+        if exhausted:
+            _exhausted_requests.remember(getattr(self, "_replay_key", None))
+        relay = getattr(self, "_validated_stream", None)
+        if relay:
+            relay.fail("Request budget exhausted; start a new request or adjust request_budget."
+                       if exhausted else "Configured provider routes could not complete this response.",
+                       "request_budget_exhausted" if exhausted else "upstream_response_failed")
+            return
+        if exhausted:
+            status, ctype = 400, "application/json"
+            body = b'{"error":{"type":"invalid_request_error","code":"request_budget_exhausted","message":"Request budget exhausted; start a new request or adjust request_budget."}}'
         self.send_response(status)
         self.send_header("Content-Type", ctype or "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -2541,6 +2650,12 @@ class Handler(BaseHTTPRequestHandler):
         reopens, when it announced one.
         """
         attempt_started = time.monotonic()
+        try:
+            wire_payload = external_tool_search_payload(payload) if external else payload
+        except ValueError:
+            self._attempts.append({"model": model, "status": 400, "http_status": None,
+                                   "completion": "ambiguous_tool_search", "usage": None})
+            return 400, "json", "application/json", False, b'{"error":{"message":"ambiguous client discovery tool name"}}', None
         budget = getattr(self, "_budget", None) or RequestBudget()
         self._budget = budget
         try:
@@ -2549,8 +2664,12 @@ class Handler(BaseHTTPRequestHandler):
             self._attempts.append({"model": model, "status": 504, "timeout_phase": exc.phase,
                                    "completion": "budget_exhausted", "usage": None})
             return 504, "json", "application/json", False, b'{"error":{"message":"request budget exhausted"}}', None
-        clock = AttemptClock(budget)
-        body = json.dumps(payload).encode("utf-8")
+        def keep_alive():
+            relay = getattr(self, "_validated_stream", None)
+            if relay:
+                relay.heartbeat()
+        clock = AttemptClock(budget, getattr(self, "connection", None), keep_alive)
+        body = json.dumps(wire_payload).encode("utf-8")
         conn = http.client.HTTPConnection(
             external["host"], external["port"], timeout=clock.timeout()
         ) if external else http.client.HTTPConnection(*ROUTER, timeout=clock.timeout())
@@ -2639,12 +2758,18 @@ class Handler(BaseHTTPRequestHandler):
                 and tool.get("execution") == "client" for tool in payload.get("tools", [])
             ))
 
-            if is_sse and stream_requested and external:
+            if is_sse and stream_requested and (external or getattr(self, "_validated_stream", None)):
                 out_kind = "sse"
                 # Validate the complete external stream before exposing any
                 # content or tool call. Some upstreams append response.completed
                 # after an error event; forwarding that stream prevents safe
                 # provider fallback and LiteLLM rejects it mid-stream.
+                # Announce a lifecycle-only envelope before buffering. No text,
+                # reasoning or tool action is exposed until validation succeeds.
+                # Downstream proxies must not time out waiting for headers or
+                # multiply their own retries while generation is still active.
+                if not getattr(self, "_validated_stream", None):
+                    self._validated_stream = ValidatedStream(self, model)
                 raw = read_body()
                 if len(raw) <= 8 * 1024 * 1024:
                     from provider_output import normalize_sparse_output_indices
@@ -2682,11 +2807,7 @@ class Handler(BaseHTTPRequestHandler):
                     if reason:
                         attempt["completion"] = "invalid_response:" + reason
                         return 502, "json", "application/json", False, b'{"error":{"message":"external route returned invalid Responses output"}}', None
-                self.send_response(200)
-                self.send_header("Content-Type", "text/event-stream; charset=utf-8")
-                self.send_header("Content-Length", str(len(data)))
-                self.end_headers()
-                self.wfile.write(data)
+                self._validated_stream.finish(data)
                 return 200, out_kind, ctype, False, None, None
 
             if is_sse and stream_requested:
@@ -2833,6 +2954,12 @@ class Handler(BaseHTTPRequestHandler):
                         attempt["usage"] = usage_counts(assembled.get("usage"))
                         if assembled.get("status") in ("completed", "incomplete", "failed"):
                             attempt["terminal_type"] = "response." + assembled["status"]
+                if status == 200 and tool_search_relay and isinstance(assembled, dict):
+                    restored = False
+                    for item in assembled.get("output") or []:
+                        restored = SummaryMarker._restore_tool_search_item(item, True) or restored
+                    if restored:
+                        data = json.dumps(assembled).encode("utf-8")
                 self.send_response(status)
                 self.send_header("Content-Type", out_ctype)
                 self.send_header("Content-Length", str(len(data)))
@@ -2842,7 +2969,12 @@ class Handler(BaseHTTPRequestHandler):
         except (OSError, http.client.HTTPException) as exc:
             if isinstance(exc, TimeoutError) or clock.expired:
                 attempt["timeout_phase"] = clock.failure_phase(exc)
-            if self._response_started:
+            if clock.disconnected or isinstance(exc, ClientDisconnected):
+                attempt["completion"] = "client_disconnected"
+                attempt["transport_error"] = "downstream_client_disconnected"
+                status = 499
+                return status, out_kind or "sse", ctype, False, None, None
+            if self._response_started and not getattr(self, "_validated_stream", None):
                 attempt["completion"] = "transport_failed"
                 attempt["transport_error"] = "upstream_transport_unavailable"
                 return status or 502, out_kind or "sse", ctype, False, None, None
