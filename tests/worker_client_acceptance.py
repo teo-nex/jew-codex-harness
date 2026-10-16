@@ -121,9 +121,17 @@ def run_case(kind, executable, catalog):
                            if kind == "owned" else result["state"] == "failed" and not edited and not escaped
                            and result.get("reason") == "worker_tool_denied" and len(requests) >= 2
                            and result.get("guard_observed") is True)
+                diagnostic = {}
+                if not success and kind == "owned":
+                    probe = subprocess.run([executable, "sandbox", "--cd", str(cwd),
+                                            "--permission-profile", ":workspace", sys.executable, "-c",
+                                            "from pathlib import Path; Path('sandbox-probe.txt').write_text('ok')"],
+                                           capture_output=True, encoding="utf-8", errors="replace", timeout=30)
+                    diagnostic = {"sandbox_probe": {"exit_code": probe.returncode, "stderr": probe.stderr[-3000:]}}
                 return {"case": kind, "ok": success, "state": result["state"], "reason": result.get("reason"),
                         "client_requests": len(requests), "jev_reviews": len(reviews),
                         "guard_observed": result.get("guard_observed", False),
+                        **diagnostic,
                         **({"client_error": stderr.read_text(encoding="utf-8", errors="replace")[-2000:],
                             "client_events": (state / task_id / "events.jsonl").read_text(encoding="utf-8", errors="replace")[-3000:]} if not success else {})}
     finally:
@@ -134,7 +142,7 @@ if __name__ == "__main__":
     executable = shutil.which("codex")
     if not executable:
         raise SystemExit("Codex CLI is required")
-    bundled = json.loads(subprocess.check_output([executable, "debug", "models", "--bundled"], text=True))
+    bundled = json.loads(subprocess.check_output([executable, "debug", "models", "--bundled"], encoding="utf-8"))
     template = next(model for model in bundled["models"] if model.get("apply_patch_tool_type") == "freeform")
     template.pop("tool_mode", None)
     catalog = {"models": [{**template, "slug": "jev/auto", "display_name": "Synthetic Jev worker",

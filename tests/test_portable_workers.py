@@ -22,7 +22,7 @@ class PortableWorkersTest(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)
-        self.base = Path(self.temp.name)
+        self.base = Path(self.temp.name).resolve()
         self.cwd = self.base / "workspace"
         self.cwd.mkdir()
         self.state = self.base / "private-state"
@@ -93,7 +93,7 @@ class PortableWorkersTest(unittest.TestCase):
             with mock.patch.object(portable, "run_checks", side_effect=checks):
                 portable._run(task_id)
         result = portable.collect(task_id)
-        self.assertEqual(result["state"], "completed")
+        self.assertEqual(result["state"], "completed", result)
         self.assertTrue(result["guard_observed"])
         self.assertEqual(result["changed_files"], [str(self.cwd / "answer.txt")])
         self.assertEqual(result["checks"][0]["exit_code"], 0)
@@ -174,7 +174,9 @@ class PortableWorkersTest(unittest.TestCase):
 
     def test_mcp_loads_without_macos_dependencies_and_dispatches(self):
         with mock.patch.object(sys, "platform", "darwin"), \
+             mock.patch.dict(os.environ, {"CANVASTTY_AGENT_ID": ""}), \
              mock.patch.dict(sys.modules, {"luna_dispatch": None}):
+            os.environ.pop("JEV_WORKER_BACKEND", None)
             spec = importlib.util.spec_from_file_location("portable_mcp_test", WORKERS / "mcp.py")
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
@@ -183,6 +185,18 @@ class PortableWorkersTest(unittest.TestCase):
             self.assertFalse(answer["isError"])
             self.assertEqual(json.loads(answer["content"][0]["text"])["task_id"], "test")
             self.assertEqual(len(module.handle({"method": "tools/list"})["tools"]), 5)
+
+    def test_mcp_preserves_canvastty_backend_inside_its_isolation(self):
+        native = mock.Mock()
+        with mock.patch.object(sys, "platform", "darwin"), \
+             mock.patch.dict(os.environ, {"CANVASTTY_AGENT_ID": "fixture"}), \
+             mock.patch.dict(sys.modules, {"luna_dispatch": native}):
+            os.environ.pop("JEV_WORKER_BACKEND", None)
+            spec = importlib.util.spec_from_file_location("canvastty_mcp_test", WORKERS / "mcp.py")
+            module = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(module)
+            self.assertEqual(module.BACKEND, "canvastty")
+            self.assertIs(module.submit, native.submit)
 
     def test_timeout_covers_child_that_never_reads_large_prompt(self):
         with mock.patch.object(portable.shutil, "which", return_value=sys.executable), \

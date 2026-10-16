@@ -2,6 +2,11 @@
 
 The default `jev-workers` backend uses the Codex CLI on macOS, Linux and
 Windows. CanvasTTY is not required for coding tasks.
+Inside a macOS CanvasTTY agent session, the existing native terminal backend
+remains the default: its outer isolation cannot launch a nested Seatbelt
+sandbox (`sandbox-exec: sandbox_apply: Operation not permitted`). No sandbox
+is disabled to work around that restriction. `JEV_WORKER_BACKEND` explicitly
+selects `portable` or `canvastty`; the latter requires an installed macOS helper.
 
 Pass `request_id`, `goal`, an absolute `cwd`, and explicit relative
 `allowed_files`. An existing directory grants ownership of its descendants;

@@ -6,7 +6,10 @@ import os
 import sys
 import time
 
-BACKEND = os.environ.get("JEV_WORKER_BACKEND", "portable")
+# CanvasTTY's outer macOS sandbox cannot start a nested Seatbelt sandbox.
+# Keep its native terminal backend; other hosts need only the Codex CLI.
+DEFAULT_BACKEND = "canvastty" if sys.platform == "darwin" and os.environ.get("CANVASTTY_AGENT_ID") else "portable"
+BACKEND = os.environ.get("JEV_WORKER_BACKEND", DEFAULT_BACKEND)
 if BACKEND not in ("portable", "canvastty") or (BACKEND == "canvastty" and sys.platform != "darwin"):
     raise RuntimeError("Unsupported JEV_WORKER_BACKEND on this platform")
 if BACKEND == "canvastty":
