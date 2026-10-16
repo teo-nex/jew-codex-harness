@@ -7,10 +7,16 @@ import uuid
 import sys
 import time
 
-if sys.platform == "darwin":
+# CanvasTTY's outer macOS sandbox cannot start a nested Seatbelt sandbox.
+# Keep its native terminal backend; other hosts need only the Codex CLI.
+DEFAULT_BACKEND = "canvastty" if sys.platform == "darwin" and os.environ.get("CANVASTTY_AGENT_ID") else "portable"
+BACKEND = os.environ.get("JEV_WORKER_BACKEND", DEFAULT_BACKEND)
+if BACKEND not in ("portable", "canvastty") or (BACKEND == "canvastty" and sys.platform != "darwin"):
+    raise RuntimeError("Unsupported JEV_WORKER_BACKEND on this platform")
+if BACKEND == "canvastty":
     from luna_dispatch import submit, status, collect, cancel, execute
 else:
-    # CanvasTTY and fcntl are macOS-only. Never import them on portable hosts.
+    # CLI workers work on every OS without CanvasTTY or fcntl.
     from portable import submit, status, collect, cancel, execute
 
 TASK_SCHEMA = {"type": "object", "required": ["request_id", "goal", "cwd", "allowed_files"],
@@ -18,7 +24,7 @@ TASK_SCHEMA = {"type": "object", "required": ["request_id", "goal", "cwd", "allo
         "cwd": {"type": "string"}, "allowed_files": {"type": "array", "items": {"type": "string"}},
         "acceptance_commands": {"type": "array", "items": {"type": "array", "items": {"type": "string"}}},
         "mandatory_instructions": {"type": "string"}, "budget": {"type": "object"},
-        "read_only": {"type": "boolean", "description": "Use an empty isolated cwd and make no file changes."},
+        "read_only": {"type": "boolean", "description": "Make no file changes; omit for coding tasks with explicit allowed_files."},
         "capabilities": {"type": "array", "uniqueItems": True,
                          "items": {"type": "string", "enum": ["browser", "computer", "pdf", "documents"]}}}}
 WAIT = {"type": "number", "minimum": 0, "maximum": 50}
@@ -70,7 +76,7 @@ def handle(message):
     method = message.get("method")
     if method == "initialize":
         return {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
-                "serverInfo": {"name": "jev-workers", "version": "0.3.0"}}
+                "serverInfo": {"name": "jev-workers", "version": "0.4.0"}}
     if method == "ping":
         return {}
     if method == "tools/list":

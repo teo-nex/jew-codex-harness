@@ -104,6 +104,9 @@ separate checks in a client that exposes those capabilities.
   effort to supported levels on each configured destination model.
 - An optional CanvasTTY browser broker on macOS when its helper is already
   installed. CanvasTTY and visible terminal workers are not installed by this kit.
+- Coding workers through the Codex CLI on macOS, Linux and Windows, with
+  explicit `allowed_files`, deterministic write guards and Jev patch review.
+  CanvasTTY is not required. See [worker permissions](WORKERS.md).
 - A 24-hour API-price comparison after real routed work. It estimates what the
   observed tokens would cost at listed API prices; it does not measure money
   paid, subscription savings, or equal task quality.

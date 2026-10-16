@@ -115,10 +115,13 @@ No confidence threshold is lowered and the CanvasTTY installation is not modifie
 | Local Jev router + provider ladder | offline tests, canary | code/tests only | code/tests only |
 | Per-user background service | launchd adapter | systemd user adapter | Task Scheduler adapter |
 | Global Codex hook/context/UI helper | packaged | packaged | packaged, ACL preflight |
-| `jev-workers` | CanvasTTY path | read-only CLI worker | read-only CLI worker |
+| `jev-workers` | guarded coding CLI worker; optional CanvasTTY | guarded coding CLI worker | guarded coding CLI worker |
 | CanvasTTY browser broker | optional | unavailable | unavailable |
 
-Full live acceptance on Linux and Windows remains pending. The portable worker refuses mutable tasks until file ownership can be enforced there. No key, auth JSON, quota snapshot, router state or log belongs in this Git repository.
+Full live acceptance on Linux and Windows remains pending. CLI workers support
+explicit file ownership, deterministic guards and Jev patch/check review on
+every OS; see [worker permissions](../WORKERS.md). No key, auth JSON, quota
+snapshot, router state or log belongs in this Git repository.
 
 ## Post-install route edits
 

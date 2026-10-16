@@ -102,8 +102,9 @@ sign in and explicitly enable native session sharing for this profile. The
 installer preserves the selected default model; autorouting is active only
 after `jev/auto` is selected. CanvasTTY is optional: the browser broker is
 available only when its macOS helper is present; native visible worker windows
-are not part of the cross-platform installer. Linux and Windows worker support
-is read-only CLI only, and the CanvasTTY browser broker is unavailable there.
+are not part of the cross-platform installer. CLI coding workers on all three
+OSes use explicit allowed_files and the installed Jev hook; see WORKERS.md.
+The CanvasTTY browser broker remains unavailable on Linux and Windows.
 
 ## 5. Return one short installation report
 
