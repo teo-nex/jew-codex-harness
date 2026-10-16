@@ -16,6 +16,7 @@ import math
 import os
 import secrets
 import shutil
+import signal
 import subprocess
 import sys
 import threading
@@ -285,16 +286,40 @@ class Controller:
                     await self.client(message)
 
 
-async def terminate(process):
-    if process.returncode is None:
+def owned_process_options():
+    if os.name == "nt":
+        return {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return {"start_new_session": True}
+
+
+async def terminate(process, *, process_tree=False):
+    # npm's codex launcher is a parent of the native executable. Killing only
+    # that launcher leaves the actual app-server and its profile locks alive.
+    if process_tree and os.name != "nt":
         with suppress(ProcessLookupError):
-            process.terminate()
+            os.killpg(process.pid, signal.SIGTERM)
+    elif process.returncode is None:
+        if process_tree and os.name == "nt":
+            killer = await asyncio.create_subprocess_exec(
+                os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "taskkill.exe"),
+                "/PID", str(process.pid), "/T", "/F", stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            await killer.wait()
+        else:
+            with suppress(ProcessLookupError):
+                process.terminate()
+    if process.returncode is None:
         try:
             await asyncio.wait_for(process.wait(), 5)
         except asyncio.TimeoutError:
             with suppress(ProcessLookupError):
-                process.kill()
+                if process_tree and os.name != "nt":
+                    os.killpg(process.pid, signal.SIGKILL)
+                else:
+                    process.kill()
             await process.wait()
+    if process_tree and os.name != "nt":
+        with suppress(ProcessLookupError):
+            os.killpg(process.pid, signal.SIGKILL)
 
 
 def emit(**event):
@@ -307,7 +332,8 @@ async def relay(receive, send, *, executable, codex_args=(), idle_seconds=DEFAUL
         raise ValueError("The controller requires its own private stdio app-server")
     backend = await asyncio.create_subprocess_exec(
         executable, "app-server", *codex_args, "--listen", "stdio://",
-        stdin=subprocess.PIPE, stdout=subprocess.PIPE, limit=MAX_MESSAGE)
+        stdin=subprocess.PIPE, stdout=subprocess.PIPE, limit=MAX_MESSAGE,
+        **owned_process_options())
     async def upstream(message):
         backend.stdin.write((json.dumps(message, ensure_ascii=False) + "\n").encode("utf-8"))
         await backend.stdin.drain()
@@ -335,7 +361,11 @@ async def relay(receive, send, *, executable, codex_args=(), idle_seconds=DEFAUL
         for task in tasks:
             task.cancel()
         await asyncio.gather(*tasks, return_exceptions=True)
-        await terminate(backend)
+        await terminate(backend, process_tree=True)
+        if backend.stdin:
+            backend.stdin.close()
+            with suppress(BrokenPipeError, ConnectionResetError):
+                await backend.stdin.wait_closed()
 
 
 async def stdio(args, executable):
@@ -404,11 +434,11 @@ async def terminal(args, executable):
         cli = await asyncio.create_subprocess_exec(
             executable, "--remote", f"ws://127.0.0.1:{port}",
             "--remote-auth-token-env", "JEV_IDLE_COMPACT_TOKEN", *args.codex_args,
-            env={**os.environ, "JEV_IDLE_COMPACT_TOKEN": token})
+            env={**os.environ, "JEV_IDLE_COMPACT_TOKEN": token}, **owned_process_options())
         try:
             return await cli.wait()
         finally:
-            await terminate(cli)
+            await terminate(cli, process_tree=True)
 
 
 def terminal_server_args(arguments):
