@@ -1,9 +1,5 @@
 #!/usr/bin/env python3
-"""Conservative non-macOS jev-workers backend using the installed Codex CLI.
-
-Only read-only tasks are admitted: Codex's workspace sandbox cannot enforce an
-allowed_files list. The worker runs in its own process and never prints CLI events.
-"""
+"""Cross-platform Codex workers with deterministic ownership and Jev review."""
 
 import hashlib
 import json
@@ -16,9 +12,48 @@ import sys
 import tempfile
 import time
 import uuid
+import importlib.util
+import tomllib
+
+from ownership import owned_paths
+from pi_worker import fingerprint, snapshot_baseline, make_patch, run_checks
 
 
 ACTIVE = {"queued", "running"}
+
+
+def hook_ready():
+    """Never enable writable workers without the packaged, unfiltered pre-tool hook."""
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    try:
+        hooks = _read(home / "hooks.json")["hooks"]["PreToolUse"]
+        script = Path(__file__).resolve().parents[2] / "integrations/jev/global/codex_hook.py"
+        import shlex
+        command = (subprocess.list2cmdline([sys.executable, str(script)]) if os.name == "nt"
+                   else shlex.join([sys.executable, str(script)])) + " pre_tool"
+        if any(entry.get("matcher") in (None, ".*", "^.*$") and any(
+                hook.get("command") == command and hook.get("type") == "command"
+                and hook.get("enabled", True) is True for hook in entry.get("hooks", [])) for entry in hooks):
+            return
+    except (OSError, ValueError, KeyError, TypeError):
+        pass
+    raise RuntimeError("Packaged Jev PreToolUse hook is required; install/verify this checkout and trust hooks in Codex")
+
+
+def authorize_checks(task):
+    if not task["acceptance_commands"]:
+        return True
+    script = Path(__file__).resolve().parents[2] / "integrations/jev/global/codex_hook.py"
+    spec = importlib.util.spec_from_file_location("portable_jev_hook", script)
+    hook = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(hook)
+    result = hook.ask_jev({"user_goal": task["goal"], "allowed_files": task["allowed_files"],
+                           "acceptance_commands": task["acceptance_commands"]},
+        {"authorization": {"type": "choice", "instructions":
+            "Authorize only the supplied local acceptance commands necessary to verify this task. Deny unrelated or destructive side effects.",
+            "criteria": {"allow": "Required bounded task checks", "deny": "Unrelated, unclear or destructive commands"}}})
+    answer = (result or {}).get("answers", {}).get("authorization", {})
+    return answer.get("choice") == "allow" and float(answer.get("confidence") or 0) >= 0.90
 
 
 def state_root():
@@ -78,19 +113,26 @@ def _validate(value):
     files = value.get("allowed_files")
     if not isinstance(files, list) or any(not isinstance(name, str) or not name for name in files):
         raise ValueError("allowed_files must be an array of paths")
-    for name in files:
-        if Path(name).is_absolute() or not (cwd / name).resolve().is_relative_to(cwd):
-            raise ValueError("allowed_file escapes cwd")
+    paths = owned_paths(cwd, files)
+    repository = Path(__file__).resolve().parents[2]
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex"))).resolve()
+    for path in paths:
+        if any(path == protected or path.is_relative_to(protected) or protected.is_relative_to(path)
+               for protected in (state_root(), home, repository)):
+            raise ValueError("Worker cannot own its profile, harness or state")
     commands = value.get("acceptance_commands", [])
     if not isinstance(commands, list) or any(
         not isinstance(command, list) or not command or any(not isinstance(arg, str) for arg in command)
         for command in commands
     ):
         raise ValueError("acceptance_commands must be argv arrays")
-    if files or commands or value.get("read_only") is not True:
-        raise RuntimeError("Portable workers support read_only tasks only; mutable ownership and acceptance commands require a verified sandbox")
+    read_only = value.get("read_only") is True
+    if read_only and (files or commands):
+        raise ValueError("Read-only workers cannot own writable files or run acceptance commands")
+    if not read_only and not files:
+        raise ValueError("Coding workers require explicit allowed_files")
     if value.get("capabilities"):
-        raise RuntimeError("Portable worker browser/computer capabilities are not verified")
+        raise RuntimeError("Portable worker UI/document capabilities are not available; use a configured capability backend")
     if value.get("requested_model") is not None:
         raise ValueError("Portable subagents use jev/auto; model pins bypass the ladder")
     instructions = value.get("mandatory_instructions", "")
@@ -104,9 +146,13 @@ def _validate(value):
         raise ValueError("Invalid max_seconds")
     if shutil.which("codex") is None:
         raise RuntimeError("Codex CLI is required for portable jev-workers")
-    return {"request_id": request_id, "goal": goal, "cwd": str(cwd), "allowed_files": [],
-            "acceptance_commands": [], "mandatory_instructions": instructions,
-            "budget": {"max_seconds": seconds}, "read_only": True}
+    check_timeout = budget.get("check_timeout_seconds", 120)
+    if isinstance(check_timeout, bool) or not isinstance(check_timeout, (int, float)) or not math.isfinite(check_timeout) or not 1 <= check_timeout <= 3600:
+        raise ValueError("Invalid check_timeout_seconds")
+    hook_ready()
+    return {"request_id": request_id, "goal": goal, "cwd": str(cwd), "allowed_files": files,
+            "acceptance_commands": commands, "mandatory_instructions": instructions,
+            "budget": {"max_seconds": seconds, "check_timeout_seconds": check_timeout}, "read_only": read_only}
 
 
 def submit(value):
@@ -118,6 +164,7 @@ def submit(value):
     directory = root / task_id
     directory.mkdir(mode=0o700)
     task["task_id"] = task_id
+    task["manifest_path"] = str(directory / "task.json")
     _write(directory / "task.json", task)
     _write(directory / "state.json", {"state": "queued", "created_at": time.time()})
     try:
@@ -131,6 +178,8 @@ def submit(value):
     with os.fdopen(fd, "w", encoding="utf-8") as output:
         json.dump({"task_id": task_id, "digest": digest}, output)
     try:
+        _write(directory / "baseline.json", fingerprint(task))
+        snapshot_baseline(task, directory)
         subprocess.Popen([sys.executable, str(Path(__file__).resolve()), "run", task_id],
                          stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
                          cwd=str(root), start_new_session=(os.name != "nt"),
@@ -142,27 +191,60 @@ def submit(value):
 
 
 def _run(task_id):
+    try:
+        _run_task(task_id)
+    except Exception:
+        _write(_directory(task_id) / "state.json", {"state": "failed", "reason": "worker_setup_failed",
+                                                   "ended_at": time.time()})
+
+
+def _run_task(task_id):
     directory = _directory(task_id)
     task = _read(directory / "task.json")
     if (directory / "cancel.request").exists():
         _write(directory / "state.json", {"state": "cancelled"})
         return
-    prompt = ("You are one read-only worker. Do not edit files, use subagents, or call jev-workers. "
+    hook_ready()
+    prompt = ("You are one bounded coding worker. Do not use subagents or call jev-workers. "
+              "Use shell only for simple read commands, without shell operators or interpreters. "
+              "Use apply_patch for edits, only within allowed_files. Do not change hooks or configuration. "
+              "Do not run tests yourself; the harness runs acceptance_commands after your turn. "
+              + ("This task is read-only. Do not change files. " if task["read_only"] else "") +
               "Do not reveal credentials or secrets in the answer.\n"
+              "Allowed files: " + json.dumps(task["allowed_files"]) + "\n"
               "Instructions: " + task["mandatory_instructions"] + "\nTask: " + task["goal"])
     answer = directory / "answer.txt"
-    command = [shutil.which("codex"), "exec", "--model", "jev/auto", "--sandbox", "read-only",
+    command = [shutil.which("codex"), "exec", "--model", "jev/auto", "--sandbox",
+               "read-only" if task["read_only"] else "workspace-write",
                "--skip-git-repo-check", "--ephemeral", "--json", "--cd", task["cwd"],
-               "-c", "mcp_servers.jev-workers.enabled=false", "--output-last-message", str(answer), "-"]
+               "-c", "features.hooks=true", "-c", "features.multi_agent=false",
+               "-c", "features.multi_agent_v2=false", "-c", "features.code_mode=false",
+               "-c", "features.code_mode_only=false", "-c", 'web_search="disabled"',
+               "-c", "agents.enabled=false", "-c", 'approval_policy="never"',
+               "-c", "apps._default.enabled=false", "-c", "features.memories=false",
+               "-c", "sandbox_workspace_write.network_access=false"]
+    home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
+    config_path = home / "config.toml"
+    config = tomllib.loads(config_path.read_text(encoding="utf-8")) if config_path.exists() else {}
+    for section in ("mcp_servers", "plugins"):
+        for name in config.get(section, {}):
+            command.extend(["-c", section + "." + json.dumps(name) + ".enabled=false"])
+    command.extend(["--output-last-message", str(answer), "-"])
+    env = {**os.environ, "JEV_WORKER_MANIFEST": str(directory / "task.json"),
+           "JEV_WORKER_MANIFEST_SHA256": hashlib.sha256((directory / "task.json").read_bytes()).hexdigest(),
+           "JEV_WORKER_STATE_DIR": str(state_root())}
     _write(directory / "state.json", {"state": "running", "started_at": time.time()})
     process = None
     try:
         # A pipe write can block before the timeout loop if Codex never reads.
-        with tempfile.TemporaryFile() as input_file:
+        events_path = directory / "events.jsonl"
+        with tempfile.TemporaryFile() as input_file, events_path.open("xb") as events:
+            if os.name != "nt":
+                events_path.chmod(0o600)
             input_file.write(prompt.encode())
             input_file.seek(0)
-            process = subprocess.Popen(command, stdin=input_file, stdout=subprocess.DEVNULL,
-                                       stderr=subprocess.DEVNULL, cwd=task["cwd"])
+            process = subprocess.Popen(command, stdin=input_file, stdout=events,
+                                       stderr=subprocess.DEVNULL, cwd=task["cwd"], env=env)
         deadline = time.monotonic() + task["budget"]["max_seconds"]
         while process.poll() is None:
             if (directory / "cancel.request").exists():
@@ -178,9 +260,40 @@ def _run(task_id):
                 _write(directory / "state.json", {"state": "blocked", "reason": "worker_timeout", "ended_at": time.time()})
                 return
             time.sleep(0.25)
-        _write(directory / "state.json", {"state": "completed" if process.returncode == 0 and answer.exists() else "failed",
-                                         "reason": None if process.returncode == 0 else "codex_exec_failed",
-                                         "ended_at": time.time()})
+        reason = None if process.returncode == 0 and answer.exists() else "codex_exec_failed"
+        # A final assistant message is not proof that its preceding tool worked.
+        with events_path.open(encoding="utf-8") as events:
+            for line in events:
+                event = json.loads(line)
+                item = event.get("item") or {}
+                if event.get("type") == "turn.failed" or (event.get("type") == "item.completed"
+                        and item.get("type") in ("file_change", "command_execution", "mcp_tool_call")
+                        and (item.get("status") == "failed" or item.get("exit_code", 0) not in (0, None))):
+                    reason = "worker_tool_failed"
+        receipt = directory / "guard.jsonl"
+        guards = [json.loads(line) for line in receipt.read_text(encoding="utf-8").splitlines()] if receipt.exists() else []
+        if any(g.get("task_id") != task_id or g.get("allowed") is not True for g in guards):
+            reason = "worker_tool_denied"
+        if reason is None and not task["read_only"] and not guards:
+            reason = "worker_guard_not_observed"
+        checks = []
+        if reason is None and task["acceptance_commands"]:
+            if authorize_checks(task):
+                checks = run_checks(task, directory)
+                if any(check.get("exit_code") != 0 for check in checks):
+                    reason = "acceptance_failed"
+            else:
+                reason = "acceptance_denied_by_jev"
+        after = fingerprint(task)
+        before = {item["path"]: item for item in _read(directory / "baseline.json")["files"]}
+        current = {item["path"]: item for item in after["files"]}
+        changed = sorted(p for p in before.keys() | current.keys() if before.get(p) != current.get(p))
+        if reason is None and not task["read_only"] and not changed:
+            reason = "worker_no_changes"
+        _write(directory / "result.json", {"checks": checks, "changed_files": changed,
+                                           "patch": make_patch(directory, changed), "guard_observed": bool(guards)})
+        _write(directory / "state.json", {"state": "completed" if reason is None else "failed",
+                                         "reason": reason, "ended_at": time.time()})
     except Exception:
         _write(directory / "state.json", {"state": "failed", "reason": "worker_runner_error", "ended_at": time.time()})
     finally:
@@ -206,8 +319,10 @@ def collect(task_id):
     directory = _directory(task_id)
     answer = directory / "answer.txt"
     full = answer.read_text(encoding="utf-8") if result["state"] == "completed" and answer.exists() else ""
-    return {**result, "summary": full[:2400], "summary_truncated": len(full) > 2400,
-            "checks": [], "changed_files": [], "usage": None, "usage_source": "unknown",
+    evidence = _read(directory / "result.json") if (directory / "result.json").exists() else {}
+    return {**result, **evidence, "summary": full[:2400], "summary_truncated": len(full) > 2400,
+            "checks": evidence.get("checks", []), "changed_files": evidence.get("changed_files", []),
+            "usage": None, "usage_source": "unknown",
             "artifact_dir": str(directory), "result_file": str(answer) if answer.exists() else None}
 
 

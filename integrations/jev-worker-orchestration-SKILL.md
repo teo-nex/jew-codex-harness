@@ -5,10 +5,13 @@ description: В режиме jev/auto создавай и веди незави�
 
 # Jev workers в режиме jev/auto
 
-На macOS с CanvasTTY доступны штатные видимые Jev-воркеры. На Linux/Windows
-переносимый MCP допускает только задачи без записи, пока файловое ownership
-для `codex exec` не будет отдельно проверено. Отказ на задачу с записью не
-обходи другим способом.
+На macOS, Linux и Windows по умолчанию доступны coding-воркеры через Codex CLI,
+без CanvasTTY. Передавай явные allowed_files: запись разрешена только через
+apply_patch в назначенные файлы после проверки Jev. Нужен установленный и
+доверенный PreToolUse-хук этого checkout. Shell допускает только чтение;
+команды приёмки запускает harness после отдельной проверки Jev. Отказ хука
+не обходи другим способом. Видимые CanvasTTY-воркеры остаются опцией на macOS
+через JEV_WORKER_BACKEND=canvastty в окружении MCP.
 
 Ограничение на способ создания сабагентов действует только при активной модели
 `jev/auto`. При ручном выборе модели штатное делегирование Codex доступно;
@@ -27,10 +30,9 @@ Computer Use и компакт контекста остаются под Jev в
 
 ## Запуск
 
-Для исследования без записи передай read_only: true, пустой
-allowed_files и новую пустую cwd; harness проверит, что папка
-осталась пустой.
-Для Browser Use укажи `capabilities: ["browser"]`: такой воркер запускается
+Для исследования без записи передай read_only: true, пустые
+allowed_files и acceptance_commands. CLI использует sandbox read-only.
+Для Browser Use нужен macOS CanvasTTY backend и `capabilities: ["browser"]`: такой воркер запускается
 в штатном терминале CanvasTTY и использует MCP `jev-browser.browser_task`.
 Брокер держит полный DOM внутри процесса, спрашивает Jev перед действиями и
 возвращает короткий проверенный результат. `clicked: true` без перехода не

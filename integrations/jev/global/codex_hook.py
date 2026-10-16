@@ -18,6 +18,8 @@ CODEX_HOME = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
 REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "server"))
 from portable_lock import locked_file  # noqa: E402
+sys.path.insert(0, str(REPO / "integrations/workers"))
+from ownership import bound_task, patch_allowed, readonly_command  # noqa: E402
 STATE = Path(os.environ.get("JEV_GLOBAL_STATE_DIR", str(CODEX_HOME / "jev-global")))
 OMNIROUTE_GUIDE = str(REPO / "OMNIROUTE-AGENT-INSTRUCTIONS.md")
 OMNIROUTE_TEXT_HELPER = str(REPO / "scripts/omniroute_text.py")
@@ -664,8 +666,9 @@ def owned_patch_policy(session, command):
     try:
         manifest = Path(match.group(1).strip()).resolve(strict=True)
         uuid.UUID(manifest.parent.name)
-        if (manifest.name != "task.json" or manifest.parent.parent.name != "jev-luna-workers"
-                or manifest.stat().st_mode & 0o077):
+        trusted_roots = {WORKER_RUNTIME.resolve(), (CODEX_HOME / "jev-harness/workers").resolve()}
+        if (manifest.name != "task.json" or manifest.parent.parent not in trusted_roots
+                or (os.name != "nt" and manifest.stat().st_mode & 0o077)):
             return False, 0.90
         task = _read(manifest)
         if (task.get("task_id") != manifest.parent.name
@@ -677,7 +680,7 @@ def owned_patch_policy(session, command):
         return False, 0.90
     if not isinstance(allowed, list) or not allowed or any(not isinstance(x, str) for x in allowed):
         return False, 0.90
-    if any(Path(name).is_absolute() or not (cwd / name).resolve().is_relative_to(cwd) for name in allowed):
+    if not patch_allowed(task, command):
         return False, 0.90
     targets = re.findall(r"(?m)^\*\*\* (Add File|Update File|Delete File|Move to):\s*(.+)$", command)
     if not targets:
@@ -744,6 +747,44 @@ def pre_tool(event):
                session=key_for(event.get("session_id")))
     value = event.get("tool_input")
     value = value if isinstance(value, dict) else {}
+    if os.environ.get("JEV_WORKER_MANIFEST"):
+        # Ownership applies even if a provider reports a concrete model ID.
+        # Only native patch calls can mutate the workspace; shell/MCP bypasses
+        # never reach Jev as candidates for authorization.
+        try:
+            task = bound_task()
+            allowed = False
+            reason = "Worker tool is outside its bounded tool surface."
+            if name == "apply_patch":
+                patch = value.get("command") or value.get("patch") or value.get("input")
+                if patch_allowed(task, patch) and len(patch) <= 60000:
+                    result = ask_jev({"user_goal": clean(task["goal"], 50000),
+                                      "allowed_files": task["allowed_files"],
+                                      "proposed_patch": clean(patch, 60000)},
+                        {"authorization": {"type": "choice", "instructions":
+                            "Allow only an assigned-file edit implementing the user goal.",
+                            "criteria": {"allow": "Scoped requested edit", "deny": "Unrelated or destructive change"}}})
+                    answer = (result or {}).get("answers", {}).get("authorization", {})
+                    allowed = answer.get("choice") == "allow" and float(answer.get("confidence") or 0) >= 0.90
+                    reason = "Jev did not authorize this worker patch."
+                else:
+                    reason = "Patch target is outside this worker's allowed_files or read_only is set."
+            elif name in ("Bash", "exec_command", "shell_command"):
+                allowed = readonly_command(value.get("command") or value.get("cmd"))
+                reason = "Worker shell permits read commands only; use apply_patch for assigned files."
+                if value.get("shell") or value.get("login") is True:
+                    allowed = False
+            elif name in ("update_plan", "view_image"):
+                allowed = True
+            receipt = Path(os.environ["JEV_WORKER_MANIFEST"]).parent / "guard.jsonl"
+            with receipt.open("a", encoding="utf-8") as output:
+                if os.name != "nt":
+                    receipt.chmod(0o600)
+                output.write(json.dumps({"task_id": task["task_id"], "tool": name,
+                                         "allowed": allowed, "time": time.time()}) + "\n")
+            return None if allowed else deny(reason)
+        except (OSError, ValueError, KeyError, TypeError):
+            return deny("Worker ownership guard failed closed.")
     if not auto_mode:
         if name == "Bash" and UI_RAW.search(str(value.get("command") or value.get("cmd") or "")):
             return deny("Use the Jev browser/computer action helper for UI changes.")

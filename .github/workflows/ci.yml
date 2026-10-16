@@ -73,6 +73,9 @@ jobs:
           repeats = 3 if os.name == 'nt' else 1;
           [subprocess.run([sys.executable, '../server/recovery_acceptance.py'], check=True)
           for _ in range(repeats)]"
+      - name: CLI worker ownership and Jev decisions with synthetic provider
+        timeout-minutes: 4
+        run: python ../tests/worker_client_acceptance.py
       - name: Full router regression suite
         run: >-
           python -c "from pathlib import Path; import os, subprocess;
