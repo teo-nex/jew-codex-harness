@@ -16,11 +16,13 @@ def main():
         state = home / "codex-router"
         state.mkdir(parents=True)
         env = {**os.environ, "CODEX_HOME": str(home), "CODEX_ROUTER_STATE_DIR": str(state)}
+        # No curated route exists yet. Stage it without querying/restarting a
+        # host service; the model/auth/catalog steps explicitly publish below.
         steps = [
             ("provider_add", ["node", str(repo / "router/src/providers.mjs"), "generic", "add", "jev",
                               "--name", "Jev Router", "--base-url", "http://127.0.0.1:4330/v1",
-                              "--adapter", "openai-responses", "--allow-private"]),
-            ("provider_enable", ["node", str(repo / "router/src/providers.mjs"), "generic", "enable", "jev"]),
+                              "--adapter", "openai-responses", "--allow-private", "--no-apply"]),
+            ("provider_enable", ["node", str(repo / "router/src/providers.mjs"), "generic", "enable", "jev", "--no-apply"]),
             ("model", ["node", str(repo / "server/configure-model.mjs")]),
             ("auth", ["node", str(repo / "server/configure-auth.mjs")]),
             ("catalog", ["node", str(repo / "router/src/refresh-catalog.mjs")]),
