@@ -38,6 +38,14 @@ Writes use `apply_patch`: every source and move destination must be owned,
 then Jev must authorize the edit. Shell calls allow a small set of reads
 (`cat`, `rg`, `ls`, `head`, `tail`, and corresponding PowerShell reads).
 Shell writes, interpreters, arbitrary MCP calls and nested agents are denied.
+Before provider review, the hook reloads the environment-bound manifest and
+verifies its digest. Jev receives the complete goal, mandatory constraints,
+working directory and deterministic ownership, plus normalized patch operations
+(`add`, `update`, `delete`, or `move`), never source diff bytes. This is a
+structural scope decision, not a correctness review: deletion and movement still
+need explicit user intent and 0.90 confidence, while controller acceptance and
+independent review remain separate gates. Receipts retain sanitized context
+source and decision metadata without raw provider errors, secrets or patch text.
 The portable backend currently rejects UI/document capabilities; the macOS
 CanvasTTY backend remains optional via `JEV_WORKER_BACKEND=canvastty` in the
 MCP server environment. It must already be installed.

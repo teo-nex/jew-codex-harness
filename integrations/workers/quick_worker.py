@@ -15,6 +15,13 @@ from pi_worker import fingerprint, make_patch, run_checks, now, write_json
 from native_fallback import NATIVE_WORKER_MODELS
 
 AUTO_MODEL = "jev/auto"
+PATCH_CONTRACT = (
+    "For edits, use exactly one V4A apply_patch envelope. New files use "
+    "*** Begin Patch, then *** Add File: owned relative path with every new line prefixed +, "
+    "then *** End Patch. Existing files use *** Begin Patch, then *** Update File: owned "
+    "relative path with an @@ hunk and context/-/+ lines, then *** End Patch. "
+    "Never emit bare unified diffs, ---/+++ headers, or merge-conflict markers. "
+)
 
 
 def capability_skill_paths(capabilities, home=None):
@@ -127,7 +134,11 @@ def command(task):
             + "\nRequired checks: " + json.dumps(task["acceptance_commands"])
             + focused_context_hint(task)
             + "\nMandatory instructions: " + task["mandatory_instructions"]
-            + "\nDo not edit files outside ownership or create subagents. For edits, use one valid apply_patch envelope: *** Begin Patch, *** Update File: owned path, an @@ hunk, context lines starting with a space, removed lines starting -, added lines starting +, *** End Patch. Never use <<<<, ==== or >>>> merge markers. The harness runs listed acceptance commands after your turn; do not run them yourself. After one denied tool call, report the denial rather than inspecting hook internals or trying command variants. Report completion briefly.")
+            + "\nDo not edit files outside ownership or create subagents. " + PATCH_CONTRACT
+            + "Use the existing read API or bounded read-only shell surface; do not use sed, nl, "
+              "inline interpreter code, or pipelines to bypass it. The harness runs listed acceptance "
+              "commands after your turn; do not run them yourself. After one denied tool call, report "
+              "the denial rather than inspecting hook internals or trying command variants. Report completion briefly.")
     return ["codex", "exec", "--json", "--skip-git-repo-check",
             "-m", model, "-C", task["cwd"], *flags, prompt]
 
@@ -137,10 +148,14 @@ def resume_command(task, thread_id):
     config_flags = initial[initial.index("-C") + 2:-1]
     manifest = ("JEV_WORKER_MANIFEST_V1: " + str(task["manifest_path"]) + "\n"
                 if task.get("manifest_path") else "")
-    feedback = (manifest + "Goal: " + str(task.get("goal") or "")[:800] + "\n"
+    feedback = (manifest + "Goal: " + str(task.get("goal") or "") + "\n"
+                "Working directory: " + str(task.get("cwd") or "") + "\n"
+                "Allowed files: " + json.dumps(task.get("allowed_files") or []) + "\n"
+                "Mandatory instructions: " + str(task.get("mandatory_instructions") or "") + "\n"
                 "The acceptance check failed and no file change or non-read tool action occurred. "
-                "Retry once in this same thread. Use a complete *** Begin Patch / *** Update File / @@ hunk "
-                "with -/+ lines / *** End Patch envelope; never use merge markers. "
+                "Retry once in this same thread. " + PATCH_CONTRACT
+                + "Use the existing read API or bounded read-only shell surface; do not use sed, nl, "
+                "inline interpreter code, or pipelines to bypass it. "
                 "Do not run acceptance commands yourself, delegate, or inspect hook internals. "
                 "Finish after the intended edit; the harness will verify it.")
     return ["codex", "exec", "resume", "--json", "--skip-git-repo-check", "-m",

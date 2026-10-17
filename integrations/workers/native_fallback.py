@@ -12,6 +12,13 @@ from codex_runtime import defaults_snapshot, restore_picker_defaults, read_nativ
 from pi_worker import fingerprint, make_patch, run_checks, usage_summary, write_json, now
 
 ACTIVE_NATIVE_STATES = {"native_starting", "native_selecting_model", "native_running", "native_cancelling"}
+PATCH_CONTRACT = (
+    "For edits, use exactly one V4A apply_patch envelope. New files use "
+    "*** Begin Patch, then *** Add File: owned relative path with every new line prefixed +, "
+    "then *** End Patch. Existing files use *** Begin Patch, then *** Update File: owned "
+    "relative path with an @@ hunk and context/-/+ lines, then *** End Patch. "
+    "Never emit bare unified diffs, ---/+++ headers, or merge-conflict markers. "
+)
 
 def view_for(bridge, binding):
     value = bridge.call("/g2/api/terminal?id=" + binding["session_id"])
@@ -156,11 +163,8 @@ def sequence(revision):
 
 
 def delivery_prompt(packet, task, packet_file):
-    """Expose the authorized goal to Jev while keeping large packets bounded."""
-    if len(packet.encode("utf-8")) <= 7000:
-        return packet
-    return ("Goal: " + task["goal"][:2400] + "\nRead the remaining task packet at "
-            + str(packet_file) + ". Report actual changes and checks.")
+    """Deliver the complete authority packet; the manifest remains verifier source."""
+    return packet
 
 def extract_turn_context(view):
     candidates = [view.get("turn_context"), view.get("turnContext"), view.get("session", {}).get("turn_context"), view.get("session", {}).get("turnContext")]
@@ -298,7 +302,10 @@ def start_native_worker(directory, task, bridge, prior_attempt_file=None, contex
               + preface + "\nGoal: " + task["goal"] +
               "\nWorking directory: " + task["cwd"] + "\nAllowed files: " + json.dumps(task["allowed_files"]) +
               "\nAcceptance commands: " + json.dumps(task["acceptance_commands"]) + "\nMandatory instructions: " + task["mandatory_instructions"] +
-              "\nVerify actual files and checks; do not trust prior worker claims.")
+              "\n" + PATCH_CONTRACT +
+              "Use the existing read API or bounded read-only shell surface; do not use sed, nl, "
+              "inline interpreter code, or pipelines to bypass it. "
+              "Verify actual files and checks; do not trust prior worker claims.")
     capabilities = set(task.get("capabilities", []))
     if "browser" in capabilities:
         packet += ("\nCanvasTTY Browser Use is provided by MCP jev-browser. "
