@@ -536,12 +536,22 @@ def review_worker_patch(task, operations):
             "unclear": "The verified task does not establish the requested scope",
         }}}
     result = ask_jev(state, questions, timeout=5)
-    answer = (result or {}).get("answers", {}).get("authorization", {})
-    usage = (result or {}).get("usage") or {}
+    result = result if isinstance(result, dict) else {}
+    answers = result.get("answers")
+    answer = answers.get("authorization") if isinstance(answers, dict) else None
+    answer = answer if isinstance(answer, dict) else {}
+    usage = result.get("usage")
+    usage = usage if isinstance(usage, dict) else {}
     try:
-        confidence = float(answer.get("confidence") or 0)
-    except (TypeError, ValueError):
+        raw_confidence = answer.get("confidence")
+        if isinstance(raw_confidence, bool):
+            raise ValueError("Boolean confidence is invalid")
+        confidence = float(raw_confidence or 0)
+        if not 0 <= confidence <= 1:
+            raise ValueError("Confidence is outside its finite range")
+    except (TypeError, ValueError, OverflowError):
         confidence = 0
+        answer = {}
     decision = answer.get("choice")
     normalized = decision if decision in ("allow", "deny", "unclear") else "unavailable"
     allowed = decision == "allow" and confidence >= 0.90

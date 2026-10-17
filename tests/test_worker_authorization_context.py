@@ -187,6 +187,16 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
         with mock.patch.object(HOOK, "ask_jev", return_value=self.decision("allow", 0.95)):
             self.assertIsNone(HOOK.pre_tool(self.event(patch)))
 
+    def test_malformed_provider_answers_fail_closed(self):
+        patch = "*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch\n"
+        responses = [[], {"answers": None}, {"answers": {"authorization": None}}]
+        responses.extend(self.decision("allow", score) for score in (True, float("inf"), float("nan"), 1.1))
+        for response in responses:
+            with self.subTest(response=response), mock.patch.object(HOOK, "ask_jev", return_value=response):
+                result = HOOK.pre_tool(self.event(patch))
+                self.assertIsNotNone(result)
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+
     def test_tampered_manifest_fails_before_provider(self):
         self.task["goal"] = "tampered"
         self.write_manifest()
