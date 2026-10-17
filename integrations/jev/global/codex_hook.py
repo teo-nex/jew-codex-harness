@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(REPO / "server"))
 from portable_lock import locked_file  # noqa: E402
 sys.path.insert(0, str(REPO / "integrations/workers"))
-from ownership import bound_task, patch_allowed, readonly_command  # noqa: E402
+from ownership import bound_task, owned_paths, patch_allowed, readonly_command  # noqa: E402
 STATE = Path(os.environ.get("JEV_GLOBAL_STATE_DIR", str(CODEX_HOME / "jev-global")))
 OMNIROUTE_GUIDE = str(REPO / "OMNIROUTE-AGENT-INSTRUCTIONS.md")
 OMNIROUTE_TEXT_HELPER = str(REPO / "scripts/omniroute_text.py")
@@ -451,16 +451,17 @@ def action_hint(name, value):
 
 def sanitized(value):
     """Redact credential-shaped values without truncating task authority."""
-    return SECRET_RX.sub("[redacted]", str(value or "")).strip()
+    return SECRET_RX.sub("[redacted]", str(value or ""))
 
 
 def verified_worker_task():
     """Reload and validate the environment-bound manifest before provider review."""
     task = bound_task()
     commands = task.get("acceptance_commands", []) if isinstance(task, dict) else None
+    instructions = task.get("mandatory_instructions", "") if isinstance(task, dict) else None
     if (not isinstance(task, dict)
             or not isinstance(task.get("goal"), str) or not task["goal"].strip()
-            or not isinstance(task.get("mandatory_instructions"), str)
+            or not isinstance(instructions, str)
             or not isinstance(task.get("cwd"), str) or not task["cwd"]
             or not isinstance(task.get("allowed_files"), list)
             or len(task["allowed_files"]) > 200
@@ -470,14 +471,15 @@ def verified_worker_task():
                    or any(not isinstance(arg, str) for arg in argv) for argv in commands)
             or not Path(task["cwd"]).resolve(strict=True).is_dir()):
         raise ValueError("Worker manifest is malformed")
-    return task
+    return {**task, "mandatory_instructions": instructions}
 
 
 def worker_patch_operations(task, command):
     """Describe normalized owned operations without source diff bytes."""
     cwd = Path(task["cwd"]).resolve(strict=True)
+    owners = owned_paths(cwd, task["allowed_files"])
     headers = re.findall(
-        r"(?m)^\*\*\* (Add File|Update File|Delete File|Move to):\s*([^\r\n]+)$",
+        r"(?m)^\*\*\* (Add File|Update File|Delete File|Move to): (.+)$",
         command,
     )
     if not headers or len(headers) > 200:
@@ -490,17 +492,16 @@ def worker_patch_operations(task, command):
     }
     operations = []
     for kind, raw in headers:
-        path = Path(raw.strip())
+        path = Path(raw)
         target = path.resolve() if path.is_absolute() else (cwd / path).resolve()
         if not target.is_relative_to(cwd):
             raise ValueError("Worker patch scope escapes cwd")
-        relative = str(target.relative_to(cwd))
-        if not any(relative == owned or relative.startswith(owned.rstrip("/") + "/")
-                   for owned in task["allowed_files"]):
+        if not any(target == owner or (owner.is_dir() and target.is_relative_to(owner))
+                   for owner in owners):
             raise ValueError("Worker patch scope is not owned")
         operations.append({
             "operation": operation_names[kind],
-            "path": relative,
+            "path": target.relative_to(cwd).as_posix(),
             "inside_working_directory": True,
         })
     return operations

@@ -1,3 +1,4 @@
+import errno
 import hashlib
 import importlib.util
 import json
@@ -14,8 +15,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load_module(name, relative):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    if spec is None or spec.loader is None:
+        raise ImportError("Synthetic test module cannot be loaded")
     module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
+    with tempfile.TemporaryDirectory() as bootstrap:
+        with mock.patch.dict(os.environ, {
+            "CODEX_HOME": str(Path(bootstrap) / "profile"),
+            "JEV_GLOBAL_STATE_DIR": str(Path(bootstrap) / "state"),
+        }):
+            spec.loader.exec_module(module)
     return module
 
 
@@ -28,6 +36,9 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)
+        state = mock.patch.object(HOOK, "STATE", self.root / "hook-state")
+        state.start()
+        self.addCleanup(state.stop)
         self.cwd = self.root / "workspace"
         self.cwd.mkdir()
         for name in ("a.py", "b.py"):
@@ -66,6 +77,16 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
 
     def write_manifest(self):
         self.manifest.write_text(json.dumps(self.task, ensure_ascii=False), encoding="utf-8")
+
+    def rebind_manifest(self):
+        self.write_manifest()
+        os.environ["JEV_WORKER_MANIFEST_SHA256"] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
+
+    def capture_patch(self, patch):
+        with mock.patch.object(HOOK, "ask_jev", return_value=self.decision("allow", 0.95)) as provider:
+            self.assertIsNone(HOOK.pre_tool(self.event(patch)))
+        provider.assert_called_once()
+        return provider.call_args.args[0]
 
     @staticmethod
     def decision(choice, confidence):
@@ -113,6 +134,46 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
         self.assertNotIn("private-code-canary", json.dumps(captured))
         self.assertNotIn("proposed_patch", captured)
 
+    def test_missing_optional_instructions_keep_legacy_manifest_compatible(self):
+        self.task.pop("mandatory_instructions")
+        self.rebind_manifest()
+        state = self.capture_patch("*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch\n")
+        self.assertEqual(state["delegation"]["constraints"], "")
+        self.assertEqual(state["user_goal"], self.goal)
+
+    def test_invalid_instruction_types_fail_before_provider(self):
+        patch = "*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch\n"
+        for invalid in (None, False, 1, [], {}):
+            with self.subTest(invalid=invalid):
+                self.task["mandatory_instructions"] = invalid
+                self.rebind_manifest()
+                with mock.patch.object(HOOK, "ask_jev") as provider:
+                    result = HOOK.pre_tool(self.event(patch))
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+                provider.assert_not_called()
+
+    def test_nested_and_dot_prefixed_ownership_uses_canonical_paths(self):
+        (self.cwd / "nested").mkdir()
+        (self.cwd / "nested" / "file.py").write_text("old\n", encoding="utf-8")
+        patch = "*** Begin Patch\n*** Update File: nested/file.py\n@@\n-old\n+new\n*** End Patch\n"
+        for owned in (["./nested/file.py"], ["nested"]):
+            with self.subTest(owned=owned):
+                self.task["allowed_files"] = owned
+                self.rebind_manifest()
+                state = self.capture_patch(patch)
+                self.assertEqual(state["patch_operations"], [{
+                    "operation": "update", "path": "nested/file.py", "inside_working_directory": True,
+                }])
+
+    def test_scope_preserves_literal_leading_space_in_filename(self):
+        name = " leading.py"
+        (self.cwd / name).write_text("old\n", encoding="utf-8")
+        self.task["allowed_files"] = [name]
+        self.rebind_manifest()
+        state = self.capture_patch(f"*** Begin Patch\n*** Update File: {name}\n@@\n-old\n+new\n*** End Patch\n")
+        self.assertEqual(state["patch_operations"][0]["path"], name)
+        self.assertEqual(state["delegation"]["allowed_files"], [name])
+
     def test_threshold_explicit_deny_unavailable_and_allow(self):
         patch = "*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch\n"
         for response, expected in (
@@ -135,7 +196,7 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
         provider.assert_not_called()
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
-    def test_existing_out_of_scope_readonly_and_symlink_guards(self):
+    def test_existing_out_of_scope_and_readonly_guards(self):
         patches = [
             "*** Begin Patch\n*** Update File: ../outside.py\n@@\n-old\n+new\n*** End Patch\n",
             "*** Begin Patch\n*** Update File: unowned.py\n@@\n-old\n+new\n*** End Patch\n",
@@ -153,10 +214,19 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
                 "*** Begin Patch\n*** Update File: a.py\n@@\n-old\n+new\n*** End Patch\n"))
             provider.assert_not_called()
             self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
-        self.task["read_only"] = False
+
+    def test_existing_symlink_guard(self):
         outside = self.root / "outside.py"
         outside.write_text("old\n", encoding="utf-8")
-        (self.cwd / "link.py").symlink_to(outside)
+        try:
+            (self.cwd / "link.py").symlink_to(outside)
+        except NotImplementedError:
+            self.skipTest("Host does not support symlinks")
+        except OSError as error:
+            if (error.errno not in {errno.EPERM, errno.EACCES, errno.ENOSYS, getattr(errno, "ENOTSUP", -1)}
+                    and getattr(error, "winerror", None) != 1314):
+                raise
+            self.skipTest("Host lacks symlink capability or privilege")
         self.task["allowed_files"] = ["link.py"]
         self.write_manifest()
         os.environ["JEV_WORKER_MANIFEST_SHA256"] = hashlib.sha256(self.manifest.read_bytes()).hexdigest()
@@ -167,6 +237,9 @@ class WorkerAuthorizationContextTests(unittest.TestCase):
             self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_initial_resume_and_native_packets_preserve_authority_and_v4a(self):
+        profile = self.root / ".codex"
+        profile.mkdir()
+        (profile / "config.toml").write_text("", encoding="utf-8")
         with mock.patch.object(QUICK.tomllib, "loads", return_value={"mcp_servers": {}, "plugins": {}}), \
                 mock.patch.object(QUICK.Path, "home", return_value=self.root):
             initial = QUICK.command(self.task)[-1]
