@@ -7,6 +7,27 @@ import jev_server as jev
 
 
 class RecoveryAcceptanceTests(unittest.TestCase):
+    def test_only_disposable_hosted_windows_defers_profile_removal(self):
+        hosted = {"GITHUB_ACTIONS": "true", "RUNNER_ENVIRONMENT": "github-hosted"}
+        with mock.patch.object(recovery.tempfile, "mkdtemp", return_value="owned-fixture") as create, \
+             mock.patch.object(recovery.tempfile, "TemporaryDirectory") as strict:
+            context, policy = recovery.fixture_directory(platform="nt", environ=hosted)
+            with context as directory:
+                self.assertEqual(directory, "owned-fixture")
+            self.assertEqual(policy, "runner_disposal")
+            create.assert_called_once()
+            strict.assert_not_called()
+        for platform, env in [("posix", hosted), ("nt", {}),
+                              ("nt", {**hosted, "RUNNER_ENVIRONMENT": "self-hosted"})]:
+            with self.subTest(platform=platform, environment=env), \
+                 mock.patch.object(recovery.tempfile, "mkdtemp") as create, \
+                 mock.patch.object(recovery.tempfile, "TemporaryDirectory") as strict:
+                context, policy = recovery.fixture_directory(platform=platform, environ=env)
+                self.assertIs(context, strict.return_value)
+                self.assertEqual(policy, "strict")
+                create.assert_not_called()
+                strict.assert_called_once()
+
     def test_fixture_stream_uses_valid_actual_transport_contract(self):
         raw = recovery.response_stream()
         self.assertIsNone(jev.external_sse_issue(raw))
@@ -63,7 +84,9 @@ class RecoveryAcceptanceTests(unittest.TestCase):
                 self.assertTrue(stopped, "servers must stop before their files are removed")
                 return inner.directory.__exit__(*args)
 
-        with mock.patch.object(recovery.tempfile, "TemporaryDirectory", Directory), \
+        # This case verifies strict cleanup independently of the CI host policy.
+        with mock.patch.dict(recovery.os.environ, {"RUNNER_ENVIRONMENT": "self-hosted"}), \
+             mock.patch.object(recovery.tempfile, "TemporaryDirectory", Directory), \
              mock.patch.object(recovery, "close_servers", side_effect=close), \
              mock.patch.object(recovery, "run_bounded", return_value=mock.Mock(returncode=1, stdout="")):
             report = recovery.run("fixture-codex")
