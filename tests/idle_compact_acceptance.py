@@ -191,7 +191,8 @@ def run_case(executable, template, model, exercise_case=exercise):
                 '[model_providers.fixture]\nname = "Synthetic idle fixture"\nwire_api = "responses"\n'
                 f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
                 'env_key = "JEV_IDLE_FIXTURE_KEY"\nrequires_openai_auth = false\n'
-                f'[projects.{json.dumps(str(work))}]\ntrust_level = "trusted"\n', encoding="utf-8")
+                f'[projects.{json.dumps(str(work))}]\ntrust_level = "trusted"\n'
+                '[features]\nplugins = false\n', encoding="utf-8")
             with patch.dict(os.environ, {"CODEX_HOME": str(home), "JEV_IDLE_FIXTURE_KEY": "synthetic"}):
                 result = asyncio.run(exercise_case(executable, work, model, requests))
             if exercise_case is exercise:

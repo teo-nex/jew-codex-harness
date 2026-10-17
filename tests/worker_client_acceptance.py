@@ -91,7 +91,8 @@ def run_case(kind, executable, catalog):
                       '[model_providers.fixture]\nname = "Local fixture"\nwire_api = "responses"\n'
                       f'base_url = "http://127.0.0.1:{server.server_port}/v1"\n'
                       'env_key = "JEV_FIXTURE_TOKEN"\nrequires_openai_auth = false\n'
-                      f'[projects.{json.dumps(str(cwd))}]\ntrust_level = "trusted"\n')
+                      f'[projects.{json.dumps(str(cwd))}]\ntrust_level = "trusted"\n'
+                      '[features]\nplugins = false\n')
             (home / "config.toml").write_text(config, encoding="utf-8")
             (home / "hooks.json").write_text(json.dumps({"hooks": _hook_entries(ROOT)}), encoding="utf-8")
             key = home / "codex-router/generic-provider-credentials/jev.key"
