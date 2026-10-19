@@ -2191,6 +2191,7 @@ class Handler(BaseHTTPRequestHandler):
         scope = cache_scope(payload, task)
         self._project_policy = None
         self._policy_ladder = None
+        routing_off = os.path.exists(OFF_PATH)
         if os.environ.get("JEV_LADDER_MODE") == "active":
             try:
                 self._policy_ladder = _provider_ladder()
@@ -2206,7 +2207,7 @@ class Handler(BaseHTTPRequestHandler):
         if self._project_policy and self._project_policy.get("native_only"):
             model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
             decision_source = "project_policy"
-        elif os.path.exists(OFF_PATH):
+        elif routing_off:
             model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "off"
         else:
             key = load_key()
@@ -2243,8 +2244,24 @@ class Handler(BaseHTTPRequestHandler):
                 model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", "no_key_or_task"
                 decision_source = "technical_fallback"
 
-        if (os.environ.get("JEV_LADDER_MODE") == "active"
-                and (self._project_policy or (not os.path.exists(OFF_PATH) and not os.path.exists(SHADOW_PATH)
+        policy_native_off = routing_off and bool(self._project_policy)
+        if policy_native_off:
+            # Emergency routing bypasses provider state, not project restrictions.
+            required = final_required(self._project_policy, payload, None)
+            if required:
+                model = ASTRA
+            try:
+                native = Ladder(restrict_project_routes(self._policy_ladder.config,
+                    {**self._project_policy, "native_only": True}, required), self._policy_ladder.path)
+                chosen = native.native_route(model, effort)
+                if chosen is None:
+                    raise ValueError("No permitted native route")
+                model = chosen["model"]
+            except (OSError, ValueError, RuntimeError):
+                return self._json(503, {"error": {"message": "No configured native route satisfies project policy"}})
+
+        if (not routing_off and os.environ.get("JEV_LADDER_MODE") == "active"
+                and (self._project_policy or (not os.path.exists(SHADOW_PATH)
                 and isinstance(payload.get("prompt_cache_key"), str)
                 and payload["prompt_cache_key"].strip()))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
@@ -2254,7 +2271,7 @@ class Handler(BaseHTTPRequestHandler):
         shadow_enabled = os.path.exists(SHADOW_PATH)
 
         would = None
-        if shadow_enabled:
+        if shadow_enabled and not routing_off:
             would = {"model": model, "effort": effort, "speed": speed, "gate": gate}
             model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "shadow(base)"
 
@@ -2267,7 +2284,7 @@ class Handler(BaseHTTPRequestHandler):
         fallback_plan = []
         no_fallback = False
         if dry_reason and model in TIERS:
-            fallback_plan = fallback_candidates(native_model, payload)
+            fallback_plan = fallback_candidates(native_model, payload) if not policy_native_off else []
             if fallback_plan:
                 model = fallback_plan.pop(0)
                 effort = tandem_effort(effort, native_model)
@@ -2312,7 +2329,7 @@ class Handler(BaseHTTPRequestHandler):
         else:
             status, out_kind, ctype, quota_hit, unwritten, resets_at = self._forward(
                 payload, out_path, stream_requested, debug, marker, model, signature, effort,
-                exact_route=bool(dry_reason and model not in TIERS))
+                exact_route=policy_native_off or bool(dry_reason and model not in TIERS))
         retried = False
         fallback = None
         if quota_hit and not dry_reason:
@@ -2320,7 +2337,7 @@ class Handler(BaseHTTPRequestHandler):
             # retry this exact canonical call before anything reaches the client.
             mark_native_dry("quota", resets_at=resets_at)
             dry_reason = "quota"
-            fallback_plan = fallback_candidates(native_model, payload)
+            fallback_plan = fallback_candidates(native_model, payload) if not policy_native_off else []
             if fallback_plan:
                 model = fallback_plan.pop(0)
                 effort = tandem_effort(effort, native_model)
@@ -2930,8 +2947,18 @@ class Handler(BaseHTTPRequestHandler):
                 # The caller edge always streams; rebuild a proper single JSON
                 # object for non-stream callers (compactions, litellm's
                 # non-stream provider path) instead of forwarding raw SSE bytes.
-                if status == 200 and (head.startswith(b"event:") or head.startswith(b"data:")):
-                    assembled = assemble_sse(data)
+                assembled_sse = status == 200 and (head.startswith(b"event:") or head.startswith(b"data:"))
+                if assembled_sse:
+                    if external and external_sse_issue(data):
+                        attempt["completion"] = "invalid_external_stream"
+                        return 502, "json", "application/json", False, b'{"error":{"message":"external route returned an incomplete Responses stream"}}', None
+                    try:
+                        assembled = assemble_sse(data)
+                    except (AttributeError, TypeError, ValueError):
+                        if not external:
+                            raise
+                        attempt["completion"] = "invalid_external_stream"
+                        return 502, "json", "application/json", False, b'{"error":{"message":"external route returned an incomplete Responses stream"}}', None
                     if external and (assembled is None or "error" in assembled):
                         attempt["completion"] = "invalid_external_stream"
                         return 502, "json", "application/json", False, b'{"error":{"message":"external route returned an incomplete Responses stream"}}', None
@@ -2946,9 +2973,6 @@ class Handler(BaseHTTPRequestHandler):
                         response_status = assembled.get("status")
                         if response_status in ("completed", "incomplete", "failed"):
                             attempt["terminal_type"] = f"response.{response_status}"
-                        headerer = SummaryMarker("", signature)
-                        for item in assembled.get("output") or []:
-                            headerer._sign_message_item(item)
                         data = json.dumps(assembled).encode("utf-8")
                         out_ctype = "application/json"
                 elif status == 200:
@@ -2961,6 +2985,22 @@ class Handler(BaseHTTPRequestHandler):
                         attempt["usage"] = usage_counts(assembled.get("usage"))
                         if assembled.get("status") in ("completed", "incomplete", "failed"):
                             attempt["terminal_type"] = "response." + assembled["status"]
+                if status == 200 and external:
+                    if (not isinstance(assembled, dict) or assembled.get("status") != "completed"
+                            or assembled.get("error") is not None or not isinstance(assembled.get("output"), list)):
+                        attempt["completion"] = "invalid_external_response"
+                        return 502, "json", "application/json", False, b'{"error":{"message":"external route returned an invalid Responses response"}}', None
+                    if validate_gonka:
+                        from provider_output import validate_gonka_response
+                        reason = validate_gonka_response(assembled, payload)
+                        if reason:
+                            attempt["completion"] = "invalid_response:" + reason
+                            return 502, "json", "application/json", False, b'{"error":{"message":"external route returned invalid Responses output"}}', None
+                if assembled_sse and assembled is not None:
+                    headerer = SummaryMarker("", signature)
+                    for item in assembled.get("output") or []:
+                        headerer._sign_message_item(item)
+                    data = json.dumps(assembled).encode("utf-8")
                 if status == 200 and tool_search_relay and isinstance(assembled, dict):
                     restored = False
                     for item in assembled.get("output") or []:
