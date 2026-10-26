@@ -203,7 +203,7 @@ ensure_uv_venv() {
     else
       uv venv --python 3.12 .venv
     fi
-  elif ! .venv/bin/python -I -c 'import encodings, sys' >/dev/null 2>&1; then
+  elif ! node src/python-bootstrap.mjs check .venv/bin/python >/dev/null 2>&1; then
     # A venv can have a present launcher whose interpreter cannot start
     # (for example after its temporary Python home was removed). Reusing it
     # lets uv install packages into a runtime that will never boot.
@@ -236,22 +236,18 @@ case "$(install_step python-deps)" in
       uv pip install --python .venv/bin/python --require-hashes -r requirements/python.txt
       node src/install-plan.mjs record python-deps
     else
-      if ! command -v python3 >/dev/null 2>&1; then
-        echo "Python 3.10+ or uv is required to install LiteLLM." >&2
-        exit 1
-      fi
-      python3 -c 'import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else "Python 3.10 or newer is required.")'
       # Same clearing logic as the uv branch: a venv with a vanished interpreter
       # home must be recreated from scratch instead of installed over.
       if node src/install-plan.mjs venv-home-ok >/dev/null 2>&1 &&
-        .venv/bin/python -I -c 'import encodings, sys' >/dev/null 2>&1; then
+        node src/python-bootstrap.mjs check .venv/bin/python >/dev/null 2>&1; then
         # Keep a healthy venv as-is. Re-running `python3 -m venv` here can
         # rewrite pyvenv.cfg with a different system Python while preserving
         # the existing launcher, creating a mixed and unusable environment.
         :
       else
         echo "The virtual environment's interpreter home is missing; recreating the venv."
-        python3 -m venv --clear .venv
+        bootstrap_python=$(node src/python-bootstrap.mjs)
+        "$bootstrap_python" -m venv --clear .venv
       fi
       .venv/bin/python -m pip install --upgrade pip
       # Same hash-verified lock as the uv branch above; both branches stay checked.

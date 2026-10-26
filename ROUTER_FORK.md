@@ -30,6 +30,11 @@ service never pulls or updates another repository by itself.
 
 ## Maintained fixes
 
+- Gateway bootstrap selects a Python compatible with its pinned dependencies
+  instead of trusting the Windows launcher's newest default. Both installers
+  check an existing venv before reuse; an unsupported default can fall back to
+  an installed versioned Python without changing the user's active interpreter.
+
 - The `jev/auto` catalog omits manual reasoning-effort controls because Jev
   selects both model and depth. Other models retain their declared effort
   ladders. An isolated catalog smoke and loopback request tests verify the

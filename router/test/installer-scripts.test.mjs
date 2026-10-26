@@ -566,12 +566,12 @@ test("broken virtual environments use the venv tools' exact-target clear mode", 
 
   assert.doesNotMatch(posix, /rm\s+-rf\s+\.venv/);
   assert.match(posix, /uv venv --clear --python 3\.12 \.venv/);
-  assert.match(posix, /python3 -m venv --clear \.venv/);
-  assert.match(posix, /\.venv\/bin\/python -I -c 'import encodings, sys'/);
+  assert.match(posix, /"\$bootstrap_python" -m venv --clear \.venv/);
+  assert.match(posix, /node src\/python-bootstrap\.mjs check \.venv\/bin\/python/);
   assert.doesNotMatch(windows, /Remove-Item\s+-Recurse.*\.venv/);
   assert.match(windows, /uv venv --clear --python 3\.12 \.venv/);
   assert.match(windows, /-m venv --clear \.venv/);
-  assert.match(windows, /\$Python -I -c "import encodings, sys"/);
+  assert.match(windows, /node src\/python-bootstrap\.mjs check \$Python/);
   assert.match(windows, /-not \$VenvHomeOk -or -not \$VenvRuntimeOk/);
 });
 

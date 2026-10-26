@@ -14,6 +14,9 @@ Experimental source release for the Codex adapter on macOS, Linux and Windows.
 - Installation records exact service-file intent before registration, so an
   interrupted owned service install can resume or roll back safely. Changed
   files still require review.
+- Gateway preparation selects an installed CPython 3.10–3.14, preferring the
+  active PATH interpreter. It avoids an incompatible Windows launcher default;
+  uv installations continue to use managed Python 3.12.
 - Typed Jev v1 responses accept newer v1 versions and `jev-latest`. Decision
   caches validate typed answers and use atomic replacement; cache-write failures
   do not discard valid decisions.

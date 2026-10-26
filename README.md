@@ -22,6 +22,7 @@ You need:
 
 - Codex CLI, Python 3.11+, Node.js 22.19+, npm, and a supported per-user service
   manager (`launchd`, `systemd --user`, or Windows Task Scheduler).
+  The gateway environment needs CPython 3.10–3.14; uv can provide Python 3.12.
 - A TypeSafe or OpenRouter API key for Jev's routing decisions. The installer
   asks for it in a hidden terminal prompt and stores it outside this repository.
 - A fresh Codex profile and free service ports. If your intended profile or

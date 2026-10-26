@@ -350,7 +350,7 @@ try {
     $VenvRuntimeOk = $false
     if (Test-Path $Python) {
       try {
-        & $Python -I -c "import encodings, sys" 2>$null | Out-Null
+        & node src/python-bootstrap.mjs check $Python 2>$null | Out-Null
         $VenvRuntimeOk = $LASTEXITCODE -eq 0
       } catch {
         $VenvRuntimeOk = $false
@@ -388,33 +388,20 @@ try {
     $VenvRuntimeOk = $false
     if (Test-Path $Python) {
       try {
-        & $Python -I -c "import encodings, sys" 2>$null | Out-Null
+        & node src/python-bootstrap.mjs check $Python 2>$null | Out-Null
         $VenvRuntimeOk = $LASTEXITCODE -eq 0
       } catch {
         $VenvRuntimeOk = $false
       }
     }
     $RecreateVenv = -not $VenvHomeOk -or -not $VenvRuntimeOk
-    if (Get-Command "py" -ErrorAction SilentlyContinue) {
-      & py -3 -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
-      if ($LASTEXITCODE -ne 0) { throw "Python 3.10 or newer is required." }
-      if (-not (Test-Path $Python)) {
-        & py -3 -m venv .venv
-      } elseif ($RecreateVenv) {
-        Write-Host "The virtual environment's interpreter home is missing; recreating the venv."
-        & py -3 -m venv --clear .venv
+    if (-not (Test-Path $Python) -or $RecreateVenv) {
+      $BootstrapPython = (& node src/python-bootstrap.mjs | Select-Object -Last 1)
+      if ($LASTEXITCODE -ne 0 -or -not $BootstrapPython) {
+        throw "Python 3.10–3.14 or uv is required for the pinned LiteLLM gateway."
       }
-    } elseif (Get-Command "python" -ErrorAction SilentlyContinue) {
-      & python -c "import sys; raise SystemExit(0 if sys.version_info >= (3, 10) else 1)"
-      if ($LASTEXITCODE -ne 0) { throw "Python 3.10 or newer is required." }
-      if (-not (Test-Path $Python)) {
-        & python -m venv .venv
-      } elseif ($RecreateVenv) {
-        Write-Host "The virtual environment's interpreter home is missing; recreating the venv."
-        & python -m venv --clear .venv
-      }
-    } else {
-      throw "Python 3.10+ or uv is required. Install uv from https://docs.astral.sh/uv/."
+      & $BootstrapPython -m venv --clear .venv
+      if ($LASTEXITCODE -ne 0) { throw "Python could not create the virtual environment." }
     }
     if (-not (Test-Path $Python)) { throw "The Python virtual environment was not created." }
     & $Python -m pip install --upgrade pip
