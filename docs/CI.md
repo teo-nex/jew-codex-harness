@@ -13,7 +13,7 @@ tests under `tests/` and `server/` across Ubuntu, macOS, and Windows with Python
 `python` commands work on every runner; local Windows commands may use `py -3`.
 
 ### Router matrix (`router`)
-The router lane runs `npm ci`, an isolated Node configuration smoke (`scripts/smoke_config_offline.py`),
+The router lane runs `npm ci`, `npm audit --omit=dev --audit-level=high`, an isolated Node configuration smoke (`scripts/smoke_config_offline.py`),
 the repository's static check (`npm run check`), and focused tests for error-chain,
 fetch transport, and transport-failure behavior under Node 22.19 and Python 3.11.
 It also runs the full embedded-router test suite and starts a fresh real Codex

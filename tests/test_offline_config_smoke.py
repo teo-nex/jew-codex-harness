@@ -34,6 +34,12 @@ class OfflineConfigurationSmokeTests(unittest.TestCase):
                 key.parent.mkdir(parents=True)
                 key.write_text("synthetic-local-transport-key", encoding="utf-8")
                 key.chmod(0o600)
+            elif script == "refresh-catalog.mjs":
+                (state / "merged-models.json").write_text(
+                    json.dumps({"models": [{"slug": "jev/auto",
+                                             "default_reasoning_level": None,
+                                             "supported_reasoning_levels": []}]}), encoding="utf-8"
+                )
             return subprocess.CompletedProcess(command, 0, stdout=b"{}", stderr=b"")
 
         output = io.StringIO()

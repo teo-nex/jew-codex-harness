@@ -173,7 +173,7 @@ class InstallCoreTests(unittest.TestCase):
 
     def test_doctor_refuses_existing_profile(self):
         self.home.mkdir()
-        (self.home / "config.toml").write_text('model = "gpt-6-sol"\n')
+        (self.home / "config.toml").write_text('model = "gpt-6.1-sol"\n')
         self.assertFalse(self._doctor()["ready"])
         self.assertIn("reviewed migration", " ".join(self._doctor()["issues"]))
 
@@ -185,9 +185,9 @@ class InstallCoreTests(unittest.TestCase):
         self.assertNotIn("synthetic", json.dumps(report))
 
     def test_merge_config_preserves_model_and_other_mcp(self):
-        source = 'model = "gpt-6-sol"\n[mcp_servers.other]\ncommand = "other"\n'
+        source = 'model = "gpt-6.1-sol"\n[mcp_servers.other]\ncommand = "other"\n'
         result = core.merge_config(source, REPO)
-        self.assertIn('model = "gpt-6-sol"', result)
+        self.assertIn('model = "gpt-6.1-sol"', result)
         self.assertIn('[mcp_servers.other]', result)
         self.assertEqual(core.merge_config(result, REPO), result)
 
@@ -332,7 +332,7 @@ class InstallCoreTests(unittest.TestCase):
         self.assertEqual(report["ladder_mode"], "native")
         self.assertTrue(report["service_health"])
 
-    def _installed(self, fail_command=None):
+    def _installed(self, fail_command=None, service_action=None):
         def process(command, **kwargs):
             if fail_command and any(fail_command in str(part) for part in command):
                 raise core.subprocess.CalledProcessError(1, command)
@@ -342,8 +342,58 @@ class InstallCoreTests(unittest.TestCase):
              mock.patch.object(core, "_router_service_definition", return_value=None), \
              mock.patch.object(core.subprocess, "run", side_effect=process), \
              mock.patch("harness.platforms.macos.service_status", return_value={"installed": False, "active": False}), \
-             mock.patch("harness.platforms.macos.install_service", return_value={"action": "install"}):
+             mock.patch("harness.platforms.macos.install_service", return_value={"action": "install"}, side_effect=service_action):
             return core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
+
+    def _service_write_failure(self):
+        def fail(plan, **_kwargs):
+            for name, data in core.platform_module("macos").service_files(plan).items():
+                path = Path(name)
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_bytes(data)
+            raise RuntimeError("synthetic failure after service definition")
+        with self.assertRaisesRegex(RuntimeError, "synthetic failure"):
+            self._installed(service_action=fail)
+        journal = json.loads((self.home / "jev-harness/journal.json").read_text())
+        self.assertEqual(journal["phase"], "service_pending")
+        self.assertTrue(journal["service_files"])
+        return journal
+
+    def test_resume_after_service_definition_write_preserves_checkpoint(self):
+        self._service_write_failure()
+        with mock.patch.object(core, "_router_service_definition", return_value=None), \
+             mock.patch.object(core.subprocess, "run") as process, \
+             mock.patch("harness.platforms.macos.service_status", return_value={
+                 "installed": True, "active": False, "owned": True}), \
+             mock.patch("harness.platforms.macos.install_service") as service:
+            result = core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
+        self.assertTrue(result["installed"])
+        service.assert_called_once()
+        process.assert_not_called()
+
+    def test_rollback_after_service_definition_write_retains_unowned_files(self):
+        journal = self._service_write_failure()
+        retained = self.home / "operator-note.txt"
+        retained.write_text("keep")
+        with mock.patch.object(core.subprocess, "run"), \
+             mock.patch("harness.platforms.macos.service_status", return_value={
+                 "installed": True, "active": False, "owned": True}):
+            result = core.rollback(self.home, "macos")
+        self.assertTrue(result["service_removed"])
+        self.assertFalse(Path(journal["definition_path"]).exists())
+        self.assertEqual(retained.read_text(), "keep")
+
+    def test_partial_service_foreign_bytes_refuse_resume_and_rollback(self):
+        journal = self._service_write_failure()
+        Path(journal["definition_path"]).write_text("foreign definition")
+        with mock.patch.object(core.subprocess, "run") as process, \
+             mock.patch("harness.platforms.macos.service_status", return_value={
+                 "installed": True, "active": False, "owned": True}):
+            with self.assertRaisesRegex(core.InstallError, "Service installation file changed"):
+                core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
+            with self.assertRaisesRegex(core.InstallError, "Service installation file changed"):
+                core.rollback(self.home, "macos")
+        process.assert_not_called()
 
     def test_partial_failure_keeps_journal_and_refuses_ambiguous_rollback(self):
         with self.assertRaises(core.subprocess.CalledProcessError):
@@ -414,7 +464,7 @@ class InstallCoreTests(unittest.TestCase):
              mock.patch("harness.platforms.macos.install_service", side_effect=RuntimeError("synthetic service failure")):
             with self.assertRaisesRegex(RuntimeError, "synthetic service failure"):
                 core.install(REPO, self.home, self.ladder, self.omni, self.key, 4321, False, "macos")
-        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "manifest_written")
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "service_pending")
         with mock.patch.object(core, "_router_service_definition", return_value=None), \
              mock.patch.object(core.subprocess, "run") as process, \
              mock.patch("harness.platforms.macos.service_status", return_value={"installed": False, "active": False}), \
@@ -502,7 +552,7 @@ class InstallCoreTests(unittest.TestCase):
     def test_manual_model_and_unrelated_host_edits_survive_reinstall_and_rollback(self):
         self._installed()
         config_path = self.home / "config.toml"
-        config_path.write_text('model = "gpt-6-sol"\n[unrelated]\nmode = "custom"\n' + config_path.read_text())
+        config_path.write_text('model = "gpt-6.1-sol"\n[unrelated]\nmode = "custom"\n' + config_path.read_text())
         hooks_path = self.home / "hooks.json"
         hooks = json.loads(hooks_path.read_text())
         foreign = {"hooks": [{"type": "command", "command": "foreign-read"}]}
@@ -520,7 +570,7 @@ class InstallCoreTests(unittest.TestCase):
         with mock.patch("harness.platforms.macos.service_status", return_value={"installed": True, "active": True, "owned": True}), \
              mock.patch("harness.platforms.macos.remove_service"):
             core.rollback(self.home, "macos")
-        self.assertIn('model = "gpt-6-sol"', config_path.read_text())
+        self.assertIn('model = "gpt-6.1-sol"', config_path.read_text())
         self.assertIn('[unrelated]', config_path.read_text())
         self.assertIn(foreign, json.loads(hooks_path.read_text())["hooks"]["PreToolUse"])
         self.assertEqual(agents_path.read_text(), "User preface\nUser footer\n")

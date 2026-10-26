@@ -38,6 +38,11 @@ def main():
         models = json.loads((state / "user-models.json").read_text())
         if sum(model.get("slug") == "jev/auto" for model in models.get("models", [])) != 1:
             raise RuntimeError("jev/auto model was not registered exactly once")
+        catalog = json.loads((state / "merged-models.json").read_text())
+        automatic = next(model for model in catalog["models"] if model.get("slug") == "jev/auto")
+        if (automatic.get("default_reasoning_level") is not None
+                or automatic.get("supported_reasoning_levels") != []):
+            raise RuntimeError("jev/auto still advertises a manual reasoning-effort selector")
         key = state / "generic-provider-credentials/jev.key"
         if not key.is_file() or not key.read_text().strip():
             raise RuntimeError("local Jev transport key is absent")

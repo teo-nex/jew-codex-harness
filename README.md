@@ -13,6 +13,9 @@ an existing router. An agent may run inside Codex, Claude Code, Gemini CLI, or
 another coding environment, but the installed integration currently targets
 Codex only.
 
+The current source release is [v0.1.0-alpha.1](https://github.com/teo-nex/jew-codex-harness/releases/tag/v0.1.0-alpha.1).
+See the [changelog](CHANGELOG.md) for routing changes and verification limits.
+
 ## Before you start
 
 You need:

@@ -739,6 +739,14 @@ export function routedModel(template, model, behaviorTemplate = template) {
     delete next.default_reasoning_level;
     delete next.supported_reasoning_levels;
   }
+  // Jev owns both model and effort selection. A manual picker would promise
+  // an override it cannot honor. Keep the required catalog fields with no
+  // choices/default; removing the levels breaks Codex's strict parser, and
+  // inventing an "auto" effort would exceed the client's fixed enum.
+  if (model.slug === "jev/auto") {
+    next.default_reasoning_level = null;
+    next.supported_reasoning_levels = [];
+  }
   // A few OpenAI-compatible upstreams reject tool scheduling the native
   // template advertises. Registry entries opt out explicitly so the picker
   // never offers a custom or parallel tool the provider backend will 400.

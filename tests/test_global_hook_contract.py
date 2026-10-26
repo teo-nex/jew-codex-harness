@@ -48,7 +48,7 @@ class GlobalHookContractTests(unittest.TestCase):
         return {"answers": {"authorization": {"choice": choice, "confidence": confidence}}}
 
     def test_manual_model_does_not_call_jev_for_ordinary_tool_use(self):
-        event = {"session_id": self.session, "model": "gpt-6-sol", "tool_name": "Bash",
+        event = {"session_id": self.session, "model": "gpt-6.1-sol", "tool_name": "Bash",
                  "tool_input": {"command": "touch synthetic-output.txt"}}
         with mock.patch.object(self.hook, "ask_jev") as ask:
             result = self.hook.pre_tool(event)
@@ -62,6 +62,40 @@ class GlobalHookContractTests(unittest.TestCase):
             result = self.hook.pre_tool(event)
         self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
         ask.assert_called_once()
+
+    def test_javascript_helper_text_does_not_authorize_an_entire_program(self):
+        for code in ("// safeBrowserClick\n42", "const text = 'safeBrowserClick';",
+                     "await safeBrowserClick(tab, 'button'); await otherAction();"):
+            with self.subTest(code=code):
+                event = {"session_id": self.session, "model": "jev/auto",
+                         "tool_name": "mcp__node_repl__js", "tool_input": {"code": code}}
+                with mock.patch.object(self.hook, "ask_jev", return_value=self.decision()) as ask:
+                    result = self.hook.pre_tool(event)
+                self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
+                ask.assert_called_once()
+
+    def test_shell_read_aliases_do_not_spend_a_semantic_decision(self):
+        for name, arguments in (("Bash", {"command": "cat fixture.txt"}),
+                                ("exec_command", {"cmd": "cat fixture.txt"}),
+                                ("shell_command", {"command": "cat fixture.txt"})):
+            with self.subTest(name=name):
+                event = {"session_id": self.session, "model": "jev/auto",
+                         "tool_name": name, "tool_input": arguments}
+                with mock.patch.object(self.hook, "ask_jev") as ask:
+                    result = self.hook.pre_tool(event)
+                self.assertIsNone(result)
+                ask.assert_not_called()
+
+    def test_metric_rotation_keeps_only_current_and_one_private_backup(self):
+        with mock.patch.object(self.hook, "METRIC_MAX_BYTES", 120):
+            for index in range(10):
+                self.hook.log_metric("fixture", counter=index, note="x" * 20)
+        files = list(self.state.glob("usage.jsonl*"))
+        self.assertEqual(len(files), 2)
+        for path in files:
+            self.assertLessEqual(path.stat().st_size, 120)
+            if os.name != "nt":
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
 
     def test_canvastty_environment_does_not_bypass_jev_auto_review(self):
         event = {"session_id": self.session, "model": "jev/auto", "tool_name": "Bash",
@@ -145,7 +179,7 @@ class GlobalHookContractTests(unittest.TestCase):
         self.assertNotIn("patch_operations", ask.call_args.args[0])
 
     def test_browser_and_computer_ui_writes_stay_guarded_for_both_modes(self):
-        for model in ("gpt-6-sol", "jev/auto"):
+        for model in ("gpt-6.1-sol", "jev/auto"):
             for tool in ("mcp__computer-use__click", "mcp__browser__click"):
                 with self.subTest(model=model, tool=tool):
                     event = {"session_id": self.session, "model": model, "tool_name": tool,
@@ -154,7 +188,7 @@ class GlobalHookContractTests(unittest.TestCase):
                     self.assertEqual(result["hookSpecificOutput"]["permissionDecision"], "deny")
 
     def test_browser_broker_rejects_url_outside_goal_in_both_modes(self):
-        for model in ("gpt-6-sol", "jev/auto"):
+        for model in ("gpt-6.1-sol", "jev/auto"):
             with self.subTest(model=model):
                 event = {"session_id": self.session, "model": model,
                          "tool_name": "mcp__jev_browser__browser_task",

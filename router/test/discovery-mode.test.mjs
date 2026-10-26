@@ -48,7 +48,7 @@ test("an unrecognized marker file keeps discovery on", () => {
     // "Cannot prove --no-discovery" must read as the state every install
     // without the flag has always had, not as a surprise lockout.
     mkdirSync(path.dirname(DISCOVERY_MODE_PATH), { recursive: true });
-    writeDiscoveryMode(false); // drop the module's cached reading via the API
+    writeDiscoveryMode(false);
     writeFileSync(DISCOVERY_MODE_PATH, "not json", "utf8");
     assert.equal(discoveryDisabled(), false);
 

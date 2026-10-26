@@ -29,10 +29,13 @@ class SplitPolicy(unittest.TestCase):
         encoded = json.dumps(QUESTIONS, separators=(",", ":"))
         self.assertLessEqual(len(encoded), 3200)
         self.assertNotIn('"luna":"luna"', encoded)
-        self.assertIn("Intermittent or concurrency failures", encoded)
-        self.assertIn("independent final code review", encoded)
-        self.assertIn("routine in-progress quality checkpoints", encoded)
-        self.assertIn("never waives a required final/risk review", encoded)
+        self.assertIn("3D/spatial graphics", encoded)
+        self.assertIn("computer use", encoded)
+        self.assertIn("heavy software development", encoded)
+        self.assertIn("wording alone does not require Astra", encoded)
+        self.assertNotIn("terra", encoded)
+        self.assertEqual(jev.LUNA, "gpt-6-luna")
+        self.assertEqual(set(jev.TIERS), {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"})
         self.assertEqual(set(QUESTIONS), {"astra_policy", "model", "effort", "lease"})
         self.assertIn("corrections and clarification turns", encoded)
         self.assertIn("reprocessing-cost evidence", encoded)
@@ -99,15 +102,41 @@ class SplitPolicy(unittest.TestCase):
     def test_valid_independent_choices_are_combined_without_an_override(self):
         for model in jev.TIERS:
             for effort in jev.EFFORTS:
-                result = decision_from_answers(self.answer(model, effort))
+                specialist = model == jev.ASTRA
+                result = decision_from_answers(self.answer(model, effort, astra_required=specialist))
                 self.assertEqual(result["model"], model)
                 self.assertEqual(result["base_model"], model)
-                self.assertEqual(result["astra_policy"], "normal")
+                self.assertEqual(result["astra_policy"], "astra" if specialist else "normal")
                 self.assertEqual(result["effort"], effort)
                 self.assertEqual(result["lease"], "one_call")
                 self.assertEqual(result["confidence"], 0.12)
                 self.assertEqual(result["chosen_probability"], 0.4)
-                self.assertEqual(result["gate"], "apply")
+                self.assertEqual(result["gate"], "astra_policy" if specialist else "apply")
+
+    def test_astra_model_choice_cannot_escape_the_specialist_gate(self):
+        for effort in jev.EFFORTS:
+            decision = decision_from_answers(self.answer(jev.ASTRA, effort))
+            self.assertEqual(decision["model"], jev.SOL)
+            self.assertEqual(decision["base_model"], jev.ASTRA)
+            self.assertEqual(decision["effort"], effort)
+            self.assertEqual(decision["gate"], "astra_scope")
+
+    def test_retired_terra_choice_is_rejected(self):
+        answer = self.answer()
+        answer["model"] = {"choice": "terra", "confidence": 1.0}
+        with self.assertRaisesRegex(ValueError, "unknown model choice"):
+            decision_from_answers(answer)
+        with self.assertRaises(ValueError):
+            route_choice("gpt-5.6-terra", "medium")
+
+    def test_retired_sol6_cannot_be_selected_or_reused_as_a_route(self):
+        self.assertEqual(jev.SOL, "gpt-6.1-sol")
+        for effort in jev.EFFORTS:
+            with self.subTest(effort=effort):
+                with self.assertRaises(ValueError):
+                    route_choice("gpt-6-sol", effort)
+                with self.assertRaises(ValueError):
+                    jev.route("gpt-6-sol", effort)
 
     def test_mandatory_categories_override_the_base_model_with_astra(self):
         result = decision_from_answers(

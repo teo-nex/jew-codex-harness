@@ -33,6 +33,13 @@ NATIVE = load_module("worker_authorization_native", "integrations/workers/native
 
 
 class WorkerAuthorizationContextTests(unittest.TestCase):
+    def test_retired_native_worker_models_are_rejected_before_ui_access(self):
+        bridge = mock.Mock()
+        for model in ("gpt-5.6-luna", "gpt-5.6-terra"):
+            with self.subTest(model=model), self.assertRaisesRegex(ValueError, "Unsupported native worker"):
+                NATIVE.choose_model_effort(bridge, {}, model=model)
+        bridge.call.assert_not_called()
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.root = Path(self.temp.name)

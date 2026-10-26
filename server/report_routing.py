@@ -59,14 +59,17 @@ import sys
 from contextlib import ExitStack
 from itertools import chain
 from local_runtime import STATE
-from routing_policy import POLICY_VERSION
+from routing_policy import POLICY_VERSION, SOL as CURRENT_SOL
 
 LIVE_LOG = os.path.join(STATE, "jev-router-live.jsonl")
 BACKTEST_STATE = os.path.join(STATE, "jev-backtest.json")
 
+# SOL below is the historical priced baseline, never a routing recommendation.
+# Sol 6.1 usage is observed but unpriced until an exact rate card is verified.
 LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
 TERRA = "gpt-5.6-terra"
-NATIVE_TIERS = (LUNA, TERRA, SOL, ASTRA)
+# Retained only to interpret historical telemetry and costs, not routing choices.
+NATIVE_TIERS = (LUNA, TERRA, SOL, CURRENT_SOL, ASTRA)
 HISTORICAL_NATIVE_TIERS = ("gpt-5.6-luna", "gpt-5.6-sol")
 
 # Prices per 1M tokens (input, output, cached input, cache write), short context,
@@ -93,6 +96,7 @@ SHORT = {
     LUNA: "luna",
     TERRA: "terra",
     SOL: "sol",
+    CURRENT_SOL: "sol6.1",
     ASTRA: "astra",
     "opencode-go/deepseek-v4.1-flash": "tandem",
     "deepseek/deepseek-v4.1-flash": "tandem",

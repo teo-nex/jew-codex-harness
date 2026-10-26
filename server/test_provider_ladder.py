@@ -52,30 +52,30 @@ class LadderTests(unittest.TestCase):
                 self.assertEqual((route["stage"], route["account"]), ("gemini", account))
                 ladder.advance("thread", route, "quota")
             for account in ("g1", "g2", "g3"):
-                route = ladder.route("thread", "gpt-6-sol", "high")
+                route = ladder.route("thread", "gpt-6.1-sol", "high")
                 self.assertEqual((route["stage"], route["account"], route["model"]),
                                  ("opus", account, "antigravity/claude-opus-4-6-thinking"))
-                self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["account"], account)
+                self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["account"], account)
                 ladder.advance("thread", route, "quota")
-            self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["stage"], "glm")
+            self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["stage"], "glm")
 
     def test_plus_jev_model_and_sticky_sequential_fallback(self):
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "state.json"
             ladder = Ladder(CONFIG, path)
-            route = ladder.route("thread-a", "gpt-6-sol", "xhigh")
+            route = ladder.route("thread-a", "gpt-6.1-sol", "xhigh")
             self.assertEqual((route["stage"], route["model"], route["account"]),
-                             ("plus", "codex/gpt-5.6-sol-xhigh", "plus"))
+                             ("plus", "gpt-6.1-sol", "plus"))
             self.assertEqual(ladder.route("thread-a", "gpt-6-luna", "low")["stage"], "plus")
             self.assertTrue(ladder.advance("thread-a", route, "quota"))
             for account in ("g1", "g2", "g3"):
                 route = ladder.route("thread-a", "gpt-6-luna", "low")
                 self.assertEqual((route["stage"], route["account"]), ("gemini", account))
-                self.assertEqual(Ladder(CONFIG, path).route("thread-a", "gpt-6-sol", "high")["account"], account)
+                self.assertEqual(Ladder(CONFIG, path).route("thread-a", "gpt-6.1-sol", "high")["account"], account)
                 self.assertTrue(ladder.advance("thread-a", route, "quota"))
             for stage, model in (("glm", "gonkagate/glm"), ("deepseek", "gonkagate/deepseek"),
                                  ("main", "gpt-6-luna")):
-                route = ladder.route("thread-a", "gpt-6-sol", "high")
+                route = ladder.route("thread-a", "gpt-6.1-sol", "high")
                 self.assertEqual((route["stage"], route["model"]), (stage, model))
                 self.assertTrue(ladder.advance("thread-a", route, "unavailable"))
             self.assertEqual(ladder.route("thread-a", "gpt-6-luna", "low")["stage"], "exhausted")
@@ -92,8 +92,12 @@ class LadderTests(unittest.TestCase):
             self.assertEqual(ladder.route("thread", "gpt-6-luna", "low")["account"], "g2")
 
     def test_model_mapping_and_invalid_config(self):
-        self.assertEqual(plus_model("gpt-6-luna", "low"), "codex/gpt-5.6-luna-low")
-        self.assertEqual(plus_model("gpt-5.6-terra", "medium"), "codex/gpt-5.6-terra-medium")
+        self.assertEqual(plus_model("gpt-6-luna", "low"), "gpt-6-luna")
+        self.assertEqual(plus_model("gpt-6.1-sol", "medium"), "gpt-6.1-sol")
+        with self.assertRaises(ValueError):
+            plus_model("gpt-6-sol", "medium")
+        with self.assertRaises(ValueError):
+            plus_model("gpt-5.6-terra", "medium")
         with tempfile.TemporaryDirectory() as directory:
             with self.assertRaises(ValueError):
                 Ladder({**CONFIG, "gemini_connection_ids": ["g1", "g1"]}, Path(directory) / "state.json")
@@ -126,11 +130,11 @@ class LadderTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             ladder = Ladder(CONFIG, Path(directory) / "state.json")
             with mock.patch("provider_ladder.time.time", return_value=1000):
-                failed = ladder.route("a", "gpt-6-sol", "high")
+                failed = ladder.route("a", "gpt-6.1-sol", "high")
                 self.assertTrue(ladder.advance("a", failed, "unavailable", cooldown_seconds=30))
-                self.assertEqual(ladder.route("b", "gpt-6-sol", "high")["stage"], "gemini")
+                self.assertEqual(ladder.route("b", "gpt-6.1-sol", "high")["stage"], "gemini")
             with mock.patch("provider_ladder.time.time", return_value=1031):
-                recovered = ladder.route("a", "gpt-6-sol", "high")
+                recovered = ladder.route("a", "gpt-6.1-sol", "high")
                 self.assertEqual(recovered["stage"], "plus")
                 self.assertTrue(ladder.note_success("a", recovered))
                 self.assertEqual(ladder.route("c", "gpt-6-luna", "low")["stage"], "plus")

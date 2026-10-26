@@ -141,6 +141,8 @@ def _validate(value):
     budget = value.get("budget", {})
     if not isinstance(budget, dict):
         raise ValueError("Invalid budget")
+    if set(budget) - {"max_seconds", "check_timeout_seconds"}:
+        raise ValueError("Unsupported portable worker budget; only max_seconds and check_timeout_seconds are enforced")
     seconds = budget.get("max_seconds", 3600)
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or not 60 <= seconds <= 86400:
         raise ValueError("Invalid max_seconds")

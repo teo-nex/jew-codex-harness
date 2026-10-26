@@ -33,7 +33,7 @@ class OrderedLadderTests(unittest.TestCase):
         for enabled in (False, True):
             config = {"providers": [{"id": "external", "model": "gateway/model",
                                      "supports_tool_search_history": enabled}]}
-            route = Ladder(config, self.path).route("scope", "gpt-6-sol", "high")
+            route = Ladder(config, self.path).route("scope", "gpt-6.1-sol", "high")
             self.assertIs(route["supports_tool_search_history"], enabled)
 
     def test_custom_order_needs_no_plus_or_gemini_and_accounts_are_sticky(self):
@@ -62,11 +62,30 @@ class OrderedLadderTests(unittest.TestCase):
         config = copy.deepcopy(CONFIG)
         ladder = Ladder(config, self.path)
         config["providers"][0]["connection_ids"].reverse()
-        self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["account"], "a1")
+        self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["account"], "a1")
         mapped = {"providers": [{"id": "mapped", "models": {m: "gateway/" + m for m in NATIVE_MODELS}}]}
         ladder = Ladder(mapped, self.path)
-        mapped["providers"][0]["models"]["gpt-6-sol"] = "unexpected"
-        self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["model"], "gateway/gpt-6-sol")
+        mapped["providers"][0]["models"]["gpt-6.1-sol"] = "unexpected"
+        self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["model"], "gateway/gpt-6.1-sol")
+
+    def test_retired_terra_mapping_is_accepted_but_never_an_active_tier(self):
+        models = {model: "gateway/" + model for model in NATIVE_MODELS}
+        models["gpt-5.6-terra"] = "gateway/retired-terra"
+        ladder = Ladder({"providers": [{"id": "mapped", "models": models}]}, self.path)
+        self.assertEqual(set(ladder.providers[0]["models"]), set(NATIVE_MODELS))
+        for model in NATIVE_MODELS:
+            self.assertEqual(ladder.route("thread", model, "high")["model"], "gateway/" + model)
+        with self.assertRaises(ValueError):
+            ladder.route("thread", "gpt-5.6-terra", "medium")
+
+    def test_retired_sol6_routes_and_mapping_keys_are_rejected(self):
+        ladder = Ladder(CONFIG, self.path)
+        with self.assertRaises(ValueError):
+            ladder.route("thread", "gpt-6-sol", "medium")
+        models = {model: "gateway/" + model for model in NATIVE_MODELS}
+        models["gpt-6-sol"] = models.pop("gpt-6.1-sol")
+        with self.assertRaises(ValueError):
+            validate_config({"providers": [{"id": "mapped", "models": models}]})
 
     def test_legacy_astra_does_not_silently_downgrade_to_sol(self):
         legacy = {"plus_connection_id": "plus", "gemini_connection_ids": ["g1"],
@@ -87,10 +106,10 @@ class OrderedLadderTests(unittest.TestCase):
 
     def test_reorder_invalidates_old_state_and_old_failure(self):
         old = Ladder(CONFIG, self.path)
-        route = old.route("thread", "gpt-6-sol", "high")
+        route = old.route("thread", "gpt-6.1-sol", "high")
         old.advance("thread", route, "quota")
         new = Ladder({"providers": list(reversed(CONFIG["providers"]))}, self.path)
-        self.assertEqual(new.route("thread", "gpt-6-sol", "high")["stage"], "native")
+        self.assertEqual(new.route("thread", "gpt-6.1-sol", "high")["stage"], "native")
         self.assertFalse(new.advance("thread", route, "quota"))
         self.assertFalse(old.note_success("thread", route))
 
@@ -98,23 +117,23 @@ class OrderedLadderTests(unittest.TestCase):
         config = {"providers": [{"id": "first", "model": "a"}, {"id": "second", "model": "b"}]}
         ladder = Ladder(config, self.path)
         with mock.patch("provider_ladder.time.time", return_value=1000):
-            failed = ladder.route("thread", "gpt-6-sol", "high")
+            failed = ladder.route("thread", "gpt-6.1-sol", "high")
             ladder.advance("thread", failed, "quota", reset_at=1100)
-            self.assertEqual(ladder.route("new-thread", "gpt-6-sol", "high")["stage"], "second")
+            self.assertEqual(ladder.route("new-thread", "gpt-6.1-sol", "high")["stage"], "second")
         with mock.patch("provider_ladder.time.time", return_value=1101):
-            probe = ladder.route("thread", "gpt-6-sol", "high")
+            probe = ladder.route("thread", "gpt-6.1-sol", "high")
             self.assertEqual(probe["stage"], "first")
             self.assertFalse(ladder.advance("thread", failed, "quota"))
             self.assertTrue(ladder.note_success("thread", probe))
-            self.assertEqual(ladder.route("fresh-thread", "gpt-6-sol", "high")["stage"], "first")
+            self.assertEqual(ladder.route("fresh-thread", "gpt-6.1-sol", "high")["stage"], "first")
 
     def test_single_provider_can_recover_after_exhaustion(self):
         ladder = Ladder({"providers": [{"id": "only", "model": "a"}]}, self.path)
         with mock.patch("provider_ladder.time.time", return_value=1000):
-            ladder.advance("thread", ladder.route("thread", "gpt-6-sol", "high"), "unavailable", cooldown_seconds=30)
-            self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["stage"], "exhausted")
+            ladder.advance("thread", ladder.route("thread", "gpt-6.1-sol", "high"), "unavailable", cooldown_seconds=30)
+            self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["stage"], "exhausted")
         with mock.patch("provider_ladder.time.time", return_value=1031):
-            self.assertEqual(ladder.route("thread", "gpt-6-sol", "high")["stage"], "only")
+            self.assertEqual(ladder.route("thread", "gpt-6.1-sol", "high")["stage"], "only")
 
     def test_invalid_config_is_rejected_before_runtime(self):
         cases = [[], [{"id": "a"}], [{"id": "a", "model": " x "}],
@@ -142,11 +161,11 @@ class OrderedLadderTests(unittest.TestCase):
             with self.subTest(invalid=invalid):
                 self.path.write_text(json.dumps({"thread": {**initial, **invalid}}))
                 with self.assertRaises(ValueError):
-                    ladder.route("thread", "gpt-6-sol", "high")
+                    ladder.route("thread", "gpt-6.1-sol", "high")
         for circuit in ([], {"config_hash": ladder.fingerprint, "until": "tomorrow"}):
             self.path.write_text(json.dumps({"thread": initial, "_ordered_primary_circuit": circuit}))
             with self.assertRaises(ValueError):
-                ladder.route("thread", "gpt-6-sol", "high")
+                ladder.route("thread", "gpt-6.1-sol", "high")
 
 
 class OrderedForwardTests(unittest.TestCase):
@@ -189,7 +208,7 @@ class OrderedForwardTests(unittest.TestCase):
                   "reasoning_profiles": {"b": {"supported": False},
                                          "c": {"supported_efforts": ["low", "high"]}}}
         calls, handler, original = self._run(config, [(503, b"error"), (503, b"error"), (200, None)])
-        self.assertEqual([p["model"] for p, _ in calls], ["gpt-6-sol", "b", "c"])
+        self.assertEqual([p["model"] for p, _ in calls], ["gpt-6.1-sol", "b", "c"])
         self.assertIsNone(calls[0][1]["external"])
         self.assertIsNotNone(calls[1][1]["external"])
         self.assertEqual([p["reasoning"].get("effort") for p, _ in calls], ["xhigh", None, "high"])
@@ -249,7 +268,7 @@ class OrderedForwardTests(unittest.TestCase):
         self.assertEqual(calls, [])
         self.assertEqual(handler._json.call_args.args[0], 400)
         calls, _, _ = self._run(CONFIG, [(200, None)], tool_search=True)
-        self.assertEqual([p["model"] for p, _ in calls], ["gpt-6-sol"])
+        self.assertEqual([p["model"] for p, _ in calls], ["gpt-6.1-sol"])
 
     def test_failed_forced_native_is_attempted_once(self):
         calls, _, _ = self._run(CONFIG, [(503, b"error")], tool_search=True)

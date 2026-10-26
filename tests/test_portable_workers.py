@@ -64,6 +64,13 @@ class PortableWorkersTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "PreToolUse"):
                 portable.submit({**task, "request_id": "missing-hook"})
 
+    def test_unenforced_budget_is_rejected_before_starting_a_worker(self):
+        with mock.patch.object(portable.shutil, "which", return_value="/fake/codex"), \
+             mock.patch.object(portable.subprocess, "Popen") as process:
+            with self.assertRaisesRegex(ValueError, "Unsupported portable worker budget"):
+                portable.submit({**self.task, "budget": {"max_input_tokens": 100}})
+        process.assert_not_called()
+
     def test_mutable_runner_reports_real_changes_checks_and_guard(self):
         content = "ok \u041f\u0440\u0438\u0432\u0435\u0442"
         task = {**self.task, "read_only": False, "allowed_files": ["answer.txt"],

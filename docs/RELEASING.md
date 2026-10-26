@@ -1,6 +1,8 @@
 # Release checklist
 
-This repository is a private alpha and has no published release yet.
+This repository publishes experimental source releases. The first release is
+`v0.1.0-alpha.1`; see [CHANGELOG.md](../CHANGELOG.md) for its scope. The embedded
+router keeps its own upstream version; it is not the harness release version.
 
 The agent-first entry point supports an installer agent running in any coding
 harness. The only bundled target adapter is Codex. Do not describe the archive
@@ -36,9 +38,8 @@ before reporting success. Rebuilding the same commit with the same packager
 version produces identical archive bytes. The package command never uploads,
 publishes, installs, or starts services.
 
-The source archive contains no `.git` history. Treat the working repository's
-existing history as private until it has been audited separately; distribute
-the reviewed archive or initialize a new repository from its extracted files.
+The source archive contains no `.git` history. Its checks cover the packaged
+tree, not every historical commit in the public repository.
 
 Run the focused packager tests with:
 
@@ -46,7 +47,13 @@ Run the focused packager tests with:
 python3 -m unittest tests.test_package_release
 ```
 
-Before a release or migration: review the exact Git commit, upstream MIT notices, lockfiles, tracked paths and secret scan; run the offline [CI](CI.md) matrix on macOS, Linux and Windows; and perform a fresh-profile install and rollback on each target host. Record process identity, service health, client configuration and one real completed `jev/auto` response separately. Do not call skipped real-host checks passing.
+Before publication: review the exact Git commit, upstream MIT notices, lockfiles,
+tracked paths and secret scan; run the offline [CI](CI.md) matrix on macOS, Linux
+and Windows. A stable release or deployment additionally requires fresh-profile
+installation and rollback on each target host. An alpha may leave those host
+checks pending only when its release notes name them explicitly. Record process
+identity, service health, client configuration and one real completed `jev/auto`
+response separately. Do not call skipped real-host checks passing.
 
 For routing changes, test a failure before client output and an interruption after output; only the former may replay a call. Verify tool-call continuity and that a provider fallback keeps the same Codex dialog. For browser/computer use, test the actual client capability and a denied risky action. Assess model quality on real development tasks separately from transport correctness and estimated API cost.
 

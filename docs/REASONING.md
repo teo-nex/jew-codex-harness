@@ -2,10 +2,43 @@
 
 Jev already chooses model capability and reasoning depth independently for
 `jev/auto`. This module maps that depth to an explicitly configured destination
-contract on each provider-ladder attempt. Manual model selection and native-only
-routing are unchanged. There is no additional model call for effort mapping.
+contract on each provider-ladder attempt. Manual model selection bypasses the
+automatic capability policy; explicit provider/project restrictions still apply.
+There is no additional model call for effort mapping.
+
+The `jev/auto` Codex catalog entry omits the manual reasoning-effort selector:
+Jev owns that choice. A saved client setting such as `medium` does not override
+a normal automatic decision. Internal model metadata retains a compatibility
+default, not a fixed execution depth. Routing-off and shadow modes preserve
+client reasoning; classifier errors use the server's explicit fallback policy.
+After updating the source, regenerate the managed catalog and open a fresh
+Codex session to check the client presentation; an existing session may retain
+its catalog or saved setting. Source and offline checks alone do not establish
+desktop or terminal UI acceptance.
 
 ## Configuration
+
+Automatic capability routing has three tiers: `gpt-6-luna` for a simple stable
+question or small unambiguous edit, `gpt-6.1-sol` for ordinary work, and
+`gpt-6-astra` only for 3D/spatial work, computer use or heavy software
+development. Ordinary architecture questions, security reviews and final code
+reviews do not by themselves require Astra. A model-only Astra answer outside
+that scope is constrained to Sol. Uncertain Luna decisions still promote to
+Sol/high; effort otherwise remains an independent Jev choice on each decision.
+Classifier failures, routing-off/shadow baselines and native-only project
+transport default to Sol. An operator's explicit `require_astra_final` policy
+and manual model choices remain overrides, not automatic classifications.
+Sol always means `gpt-6.1-sol` in automatic routing; `gpt-6-sol` is retired.
+Historical cost reports retain their exact old model IDs and price cards;
+Sol 6.1 usage is counted as unpriced until its own rate card is verified.
+
+Route reuse requires a real `prompt_cache_key`, an unchanged user turn and
+request contract, and a clean tool continuation. A lease lasts at most five
+minutes and eight reuses; successful calls do not renew those limits. Changed
+turns, errors, exhausted leases and tool-chain changes trigger reassessment.
+In-memory route and cache scopes are capped at 256 each and expired sessions
+are collected. Provider selection still applies when no cache key is present;
+only continuity is disabled in that case.
 
 Add a `reasoning_profiles` object to the existing protected ladder JSON passed
 to the installer via `--ladder-config` (runtime `JEV_LADDER_CONFIG`).

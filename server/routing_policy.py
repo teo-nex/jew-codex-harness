@@ -2,45 +2,39 @@
 import math
 import os
 
-POLICY_VERSION = "split-v12-luna6-sol6"
-LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6-sol", "gpt-6-astra"
-TERRA = "gpt-5.6-terra"
-TIERS = (LUNA, TERRA, SOL, ASTRA)
+POLICY_VERSION = "split-v14-luna6-sol6.1-astra-specialist"
+LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"
+TIERS = (LUNA, SOL, ASTRA)
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LEASES = ("one_call", "tool_chain", "user_turn")
 
-MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL, "astra": ASTRA}
+MODEL_IDS = {"luna": LUNA, "sol": SOL, "astra": ASTRA}
 ASTRA_POLICY = {
     "astra": (
-        "Remaining work is project architecture, independent final code review, or "
-        "risk-focused review of security, auth/permissions, concurrency, migrations, "
-        "public API compatibility or material performance risks. "
-        "A good checkpoint score never waives a required final/risk review."
+        "Remaining work is 3D/spatial graphics, computer use or visual desktop interaction, "
+        "or heavy software development: substantial system construction/redesign or "
+        "exceptionally difficult multi-component implementation/debugging. "
+        "Use only while this specialist/heavy phase remains."
     ),
     "normal": (
-        "Implementation, tests, routine in-progress quality checkpoints, score comparison, "
-        "fixing established findings, administration or reporting. "
-        "No remaining final/risk review or architecture. Review wording alone is insufficient."
+        "Everything else: ordinary development, tools, tests, debugging, architecture questions, "
+        "code/security/final review, administration and reporting. "
+        "Review, risk or architecture wording alone does not require Astra."
     ),
 }
 MODEL_PROFILES = {
     "luna": (
-        "One stable question without tools or current facts, or one-function edit with "
-        "explicit tests and no design choice. Short alone does not prove simplicity."
-    ),
-    "terra": (
-        "Several cooperating functions or multiple files with clear requirements and known "
-        "patterns. More integration than one self-contained change, but no open-ended design."
+        "Luna 6 only: one simple stable question, or a small unambiguous localized edit "
+        "with no design choice. Short alone does not prove simplicity."
     ),
     "sol": (
-        "Infer implied intent, resolve underspecified goals, investigate and choose an approach; "
-        "complex implementation, robust tests, multi-file refactoring or debugging. "
-        "Avoid needless clarification loops."
+        "Default for all other ordinary work: implementation across functions/files, tools, "
+        "tests, debugging, refactoring, reviews and unclear requirements. "
+        "Use unless the task is clearly Luna-simple or Astra-specialist/heavy."
     ),
     "astra": (
-        "Intermittent or concurrency failures, distributed-systems architecture or strong "
-        "consistency, production safety review, or exceptionally ambiguous broad work where "
-        "an error has material consequences."
+        "Only 3D/spatial graphics, computer use/visual desktop interaction or heavy "
+        "software development as defined by astra_policy. Not ordinary reviews or planning."
     ),
 }
 DEPTH_PROFILES = {
@@ -81,7 +75,7 @@ QUESTIONS = {
         "instructions": (
             "Minimize total task cost including corrections and clarification turns. "
             "Choose sufficient capability for remaining work. "
-            "Cost order: luna < terra < sol < astra. "
+            "Default to Sol; use Luna 6 for clearly simple work and Astra only for specialist/heavy work. "
             "Use cache_state model state, read_pct, age_s and context_k as reprocessing-cost "
             "evidence. Keep a sufficient last model, especially with large context; switch "
             "when capability demands it. hot means a real read; warming only recent success. "
@@ -191,14 +185,19 @@ def decision_from_answers(answers):
         if probabilities is not None
     ]
     selected_model = ASTRA if astra_policy == "astra" else MODEL_IDS[model_choice]
+    gate = "astra_policy" if astra_policy == "astra" else "apply"
+    if astra_policy == "normal" and selected_model == ASTRA:
+        selected_model, gate = SOL, "astra_scope"
     policy_cap = os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1"
     if policy_cap and selected_model == ASTRA:
         selected_model = SOL
+        gate = "policy_cap"
         if EFFORTS.index(effort) < EFFORTS.index("xhigh"):
             effort = "xhigh"
-    elif selected_model in (LUNA, TERRA) and (model_conf is None or model_conf < 0.90 or
-                                              astra_conf is None or astra_conf < 0.90):
+    elif selected_model == LUNA and (model_conf is None or model_conf < 0.90 or
+                                     astra_conf is None or astra_conf < 0.90):
         selected_model = SOL
+        gate = "confidence_hold"
         if EFFORTS.index(effort) < EFFORTS.index("high"):
             effort = "high"
     return {
@@ -208,9 +207,7 @@ def decision_from_answers(answers):
         "effort": effort,
         "lease": lease,
         "speed": "default",
-        "gate": ("policy_cap" if policy_cap and (astra_policy == "astra" or model_choice == "astra") else
-                 "confidence_hold" if selected_model == SOL and model_choice in ("luna", "terra") else
-                 "astra_policy" if astra_policy == "astra" else "apply"),
+        "gate": gate,
         # Conservative diagnostics: the weakest independent judgment.
         "confidence": min(confidences) if confidences else None,
         "probabilities": {

@@ -335,6 +335,20 @@ test("ClinePass routed models omit the unsupported reasoning-effort selector", (
   assert.deepEqual(normal.supported_reasoning_levels, grok.reasoningLevels);
 });
 
+test("jev/auto omits manual effort controls even when its template advertises them", () => {
+  const automatic = routedModel({
+    ...template,
+    default_reasoning_level: "high",
+    supported_reasoning_levels: grok.reasoningLevels,
+  }, { ...grok, slug: "jev/auto", defaultEffort: "medium" });
+  assert.equal(automatic.default_reasoning_level, null);
+  assert.deepEqual(automatic.supported_reasoning_levels, []);
+
+  const manual = routedModel(template, { ...grok, slug: "jev/manual" });
+  assert.equal(manual.default_reasoning_level, "high");
+  assert.deepEqual(manual.supported_reasoning_levels, grok.reasoningLevels);
+});
+
 test("current Codex search contract distinguishes supported and unsupported routed models", () => {
   // The managed provider opts in globally, while this catalog field is the
   // second, per-model gate Codex requires before it exposes standalone search.

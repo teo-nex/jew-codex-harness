@@ -65,13 +65,19 @@ health do not prove the client loaded a hook.
 
 The installer bootstraps the router with credential discovery disabled. It leaves
 native ChatGPT session sharing pending: local install and service health do not
-prove that the Plus-first or native-only route can answer. After the account
+prove that the native-only route can answer. After the account
 owner signs in with `CODEX_HOME` set to the new profile, explicitly enable
 discovery and sharing with `node router/src/discovery-mode.mjs set enabled` and
 `node router/src/chatgpt-session.mjs enable`, using that same `CODEX_HOME` and
 `CODEX_ROUTER_STATE_DIR`. This permits the router to read the Codex session;
 review that access before opting in. Then run `verify --live` in the selected
-profile. If OAuth changes `auth.json` during an interrupted installation,
+profile. Discovery changes also apply to the running router; restarting the
+Codex app alone does not change the router's profile or credentials. The app
+and router must use the same intended `CODEX_HOME`. In signed routing, Codex
+supplies its own login bearer; session sharing is a separate opt-in that lets
+other local router clients (including the Jev relay) use that login. A
+`not shared` status alone therefore does not explain a signed Codex 401.
+If OAuth changes `auth.json` during an interrupted installation,
 inspect the journal and resume with `--reviewed-auth-sha256 HASH` for its exact
 locally computed SHA-256. Do not print or send the auth file. A router bootstrap
 that stopped before its ownership checkpoint remains blocked for manual review.

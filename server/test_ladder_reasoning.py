@@ -48,9 +48,9 @@ class LadderConfigReasoningTests(unittest.TestCase):
         """Native/manual routing and non-ladder requests are unchanged."""
         import jev_server
         # apply_route_payload directly preserves manual request parameters
-        payload = {"model": "gpt-6-sol", "reasoning": {"effort": "high"}}
+        payload = {"model": "gpt-6.1-sol", "reasoning": {"effort": "high"}}
         original = dict(payload["reasoning"])
-        injected, transport = jev_server.apply_route_payload(payload, "gpt-6-sol", "high", original)
+        injected, transport = jev_server.apply_route_payload(payload, "gpt-6.1-sol", "high", original)
         self.assertIsNone(injected)
         self.assertEqual(payload["reasoning"]["effort"], "high")
 
@@ -58,7 +58,7 @@ class LadderConfigReasoningTests(unittest.TestCase):
         import jev_server
         original = {"effort": "high", "summary": "auto"}
         payload = {"input": "synthetic", "reasoning": dict(original)}
-        jev_server.apply_route_payload(payload, "gpt-6-sol", None, original)
+        jev_server.apply_route_payload(payload, "gpt-6.1-sol", None, original)
         self.assertEqual(payload["reasoning"], original)
 
 
@@ -148,7 +148,7 @@ class LadderReasoningIntegrationTests(unittest.TestCase):
             server_instance._serve_ladder(
                 payload=payload_copy,
                 scope="test-thread-1",
-                base_model="gpt-6-sol",
+                base_model="gpt-6.1-sol",
                 effort="xhigh",
                 decision={"model": "SOL", "effort": "xhigh", "gate": "auto"},
                 step={"step_type": "user_turn", "errored": False, "digest": ""},
@@ -163,14 +163,14 @@ class LadderReasoningIntegrationTests(unittest.TestCase):
             for call in forward_calls:
                 self.assertEqual(call["payload"]["input"], original_payload["input"])
                 self.assertEqual(call["payload"]["prompt_cache_key"], "cache-1")
-            self.assertIn("codex/gpt-5.6-sol-xhigh", models_called)
+            self.assertIn("gpt-6.1-sol", models_called)
             self.assertIn("antigravity/gemini-2.5", models_called)
             self.assertIn("gonkagate/glm", models_called)
             self.assertIn("gonkagate/deepseek-r1", models_called)
             self.assertIn("gpt-6-luna", models_called)
 
             # 1. Plus stage (unconfigured profile -> legacy unknown, keeps xhigh)
-            plus_call = next(c for c in forward_calls if c["model"] == "codex/gpt-5.6-sol-xhigh")
+            plus_call = next(c for c in forward_calls if c["model"] == "gpt-6.1-sol")
             self.assertEqual(plus_call["effective_effort"], "xhigh")
             self.assertEqual(plus_call["payload"]["reasoning"]["effort"], "xhigh")
             self.assertNotIn("reasoning_effort", plus_call["payload"])
@@ -203,7 +203,7 @@ class LadderReasoningIntegrationTests(unittest.TestCase):
 
             # Verify telemetry on attempts has requested_effort, effective_effort, reasoning_source
             for att in server_instance._attempts:
-                if att["model"] == "codex/gpt-5.6-sol-xhigh":
+                if att["model"] == "gpt-6.1-sol":
                     self.assertEqual(att["requested_effort"], "xhigh")
                     self.assertEqual(att["effective_effort"], "xhigh")
                     self.assertEqual(att["reasoning_status"], "unknown")
@@ -277,7 +277,7 @@ class LadderReasoningIntegrationTests(unittest.TestCase):
             server_instance._serve_ladder(
                 payload=payload,
                 scope="test-thread-none",
-                base_model="gpt-6-sol",
+                base_model="gpt-6.1-sol",
                 effort=None,
                 decision={"model": "SOL", "effort": None, "gate": "auto"},
                 step={"step_type": "user_turn", "errored": False, "digest": ""},
@@ -288,7 +288,7 @@ class LadderReasoningIntegrationTests(unittest.TestCase):
 
             # Plus model receives routed effort "xhigh" from original reasoning
             self.assertEqual(len(forward_calls), 1)
-            self.assertEqual(forward_calls[0]["model"], "codex/gpt-5.6-sol-xhigh")
+            self.assertEqual(forward_calls[0]["model"], "gpt-6.1-sol")
             self.assertEqual(forward_calls[0]["effective_effort"], "xhigh")
             att = server_instance._attempts[0]
             self.assertEqual(att["requested_effort"], "xhigh")

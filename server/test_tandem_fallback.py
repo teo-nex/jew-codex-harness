@@ -40,7 +40,7 @@ MISMATCHED = (
 
 
 def jev_answer(tier, depth, confidence, lease="one_call"):
-    pair = route_choice(tier, depth, lease=lease)
+    pair = route_choice(tier, depth, astra_required=tier == jev.ASTRA, lease=lease)
     return {"answers": {
         "astra_policy": {"choice": pair["astra_policy"], "confidence": confidence},
         "model": {"choice": pair["model"], "confidence": confidence},
@@ -130,11 +130,14 @@ class TandemHandoff(unittest.TestCase):
         self.enterContext(mock.patch.object(jev, "log_line", side_effect=record))
         self.edge = ThreadingHTTPServer(("127.0.0.1", 0), Edge)
         threading.Thread(target=self.edge.serve_forever, daemon=True).start()
-        # Keep the decision local: no Jev call (so no API key), dry mode on.
+        # Transport tests use a synthetic eligible heavy-work decision, not
+        # the technical fallback. No real Jev key or provider is contacted.
         self.saved = (jev.ROUTER, jev.caller_secret, jev.load_key, jev.native_dry)
         jev.ROUTER = ("127.0.0.1", self.edge.server_address[1])
         jev.caller_secret = lambda: "test-caller-secret"
-        jev.load_key = lambda: ""
+        jev.load_key = lambda: "fixture-key"
+        self.enterContext(mock.patch.object(jev, "call_jev_routed",
+            return_value=jev_answer(jev.ASTRA, "medium", 0.95)))
         jev.native_dry = lambda: "manual"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), jev.Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -367,7 +370,7 @@ class TandemHandoff(unittest.TestCase):
         jev.native_dry = lambda: None
         jev.load_key = lambda: "fixture-key"
         for tier, depth, client_speed in ((jev.LUNA, "low", "priority"),
-                                         (jev.TERRA, "high", "priority"),
+                                         (jev.SOL, "medium", "priority"),
                                          (jev.LUNA, "medium", "fast"),
                                          (jev.SOL, "high", "priority"),
                                          (jev.ASTRA, "xhigh", "fast")):
@@ -490,7 +493,7 @@ class TandemHandoff(unittest.TestCase):
             else:
                 response = json.loads(body)
             self.assertEqual(response["output"][0]["content"][0]["text"], header + "OK")
-        # Shadow mode serves Astra while Jev proposes Luna; the header must
+        # Shadow mode serves Sol while Jev proposes Luna; the header must
         # describe the actual response, not the hypothetical choice.
         with open(jev.SHADOW_PATH, "w"):
             pass
@@ -503,7 +506,7 @@ class TandemHandoff(unittest.TestCase):
         ):
             status, body = self.call(reasoning={"effort": "high"})
         self.assertEqual(status, 200)
-        actual = jev.answer_signature({"model": jev.ASTRA, "effort": "high"})
+        actual = jev.answer_signature({"model": jev.SOL, "effort": "high"})
         self.assertEqual(json.loads(body)["output"][0]["content"][0]["text"], actual + "OK")
 
     def test_a_relayed_stream_repeats_the_id_it_opened_on(self):

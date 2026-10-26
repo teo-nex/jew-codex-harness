@@ -3,16 +3,14 @@
 from .client import task_classification
 
 LUNA = "gpt-6-luna"
-LUNA_PREVIOUS = "gpt-5.6-luna"
-TERRA_PREVIOUS = "gpt-5.6-terra"
-ORCHESTRATOR = "gpt-6-sol"
+ORCHESTRATOR = "gpt-6.1-sol"
 MIN_LUNA_CONFIDENCE = 0.90
 
 
 def choose_route(root, task, cache_dir):
     """Return a bounded route and the raw Jev judgment for audit."""
     pin = task.get("requested_model")
-    if pin in (LUNA, LUNA_PREVIOUS, TERRA_PREVIOUS):
+    if pin == LUNA:
         return {"route": "quick" if task.get("question_only") else "luna", "model": pin,
                 "effort": "low" if task.get("question_only") else "medium",
                 "reason": "explicit_model_pin", "jev": None}

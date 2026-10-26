@@ -84,7 +84,7 @@ class KeyLoading(unittest.TestCase):
              mock.patch.object(jev.sys, "stderr", stderr):
             self.assertTrue(jev.warn_if_key_missing())
         self.assertIn("Jev decision API key is not configured", stderr.getvalue())
-        self.assertIn("fail open to astra", stderr.getvalue())
+        self.assertIn("fail open to sol", stderr.getvalue())
 
     @unittest.skipIf(os.name == "nt", "POSIX mode bits do not represent Windows ACLs")
     def test_openrouter_key_file_is_private_and_does_not_use_typesafe_fallback(self):
@@ -235,7 +235,7 @@ class QuotaReset(unittest.TestCase):
 class DryTandem(unittest.TestCase):
     def test_frontier_steps_go_to_glm_and_the_rest_to_deepseek(self):
         self.assertEqual(jev.dry_target(jev.ASTRA, "high")[0], jev.GO_FRONTIER)
-        for tier in (jev.LUNA, jev.TERRA, jev.SOL):
+        for tier in (jev.LUNA, jev.SOL):
             self.assertEqual(jev.dry_target(tier, "high")[0], jev.GO_STANDARD)
 
     def test_the_tandem_never_receives_a_rung_its_model_cannot_serve(self):

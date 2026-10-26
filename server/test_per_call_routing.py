@@ -239,8 +239,8 @@ class PerCallEndToEnd(unittest.TestCase):
         choices = [
             answer(jev.LUNA, "low"),
             answer(jev.SOL, "high"),
-            answer(jev.TERRA, "medium"),
-            answer(jev.ASTRA, "xhigh"),
+            answer(jev.SOL, "medium"),
+            answer(jev.ASTRA, "xhigh", astra_required=True),
         ]
         with mock.patch.object(jev, "call_jev_routed", side_effect=choices) as judge:
             self.call(payload_for(opening))
@@ -250,10 +250,37 @@ class PerCallEndToEnd(unittest.TestCase):
         self.assertEqual(judge.call_count, 4)
         self.assertEqual(
             [p["model"] for p in Edge.payloads],
-            [jev.LUNA, jev.SOL, jev.TERRA, jev.ASTRA],
+            [jev.LUNA, jev.SOL, jev.SOL, jev.ASTRA],
         )
         self.assertEqual([r["routing_scope"] for r in self.records], ["one_call"] * 4)
         self.assertEqual(len({r["cache_scope"] for r in self.records}), 1)
+
+    def test_client_effort_does_not_override_automatic_routing(self):
+        for client_effort, chosen_effort in (("low", "high"), ("max", "low")):
+            with self.subTest(client_effort=client_effort), mock.patch.object(
+                jev, "call_jev_routed", return_value=answer(jev.SOL, chosen_effort),
+            ) as judge:
+                self.call(payload_for(
+                    [message("user", "implement this bounded change")],
+                    reasoning={"effort": client_effort, "summary": "auto"},
+                ))
+            self.assertEqual(judge.call_count, 1)
+            forwarded = Edge.payloads[-1]
+            self.assertEqual(forwarded["model"], jev.SOL)
+            self.assertEqual(forwarded["reasoning"], {
+                "effort": chosen_effort, "summary": "auto",
+            })
+
+    def test_classifier_failure_and_missing_key_default_to_sol(self):
+        for key in ("", "fixture-key"):
+            with self.subTest(key_present=bool(key)), mock.patch.object(
+                jev, "load_key", return_value=key,
+            ), mock.patch.object(jev, "call_jev_routed", side_effect=TimeoutError) as judge:
+                self.call(payload_for([message("user", "perform ordinary development")]))
+            self.assertEqual(judge.call_count, int(bool(key)))
+            self.assertEqual(Edge.payloads[-1]["model"], jev.SOL)
+            self.assertEqual(Edge.payloads[-1]["reasoning"]["effort"], "medium")
+            self.assertEqual(self.records[-1]["decision_source"], "technical_fallback")
 
     def test_user_turn_lease_skips_repeat_jev_input_across_clean_tools(self):
         opening = [message("user", "inspect these files and report")]
@@ -280,7 +307,7 @@ class PerCallEndToEnd(unittest.TestCase):
             side_effect=[
                 answer(jev.LUNA, "low", lease="tool_chain"),
                 answer(jev.SOL, "high"),
-                answer(jev.ASTRA, "high"),
+                answer(jev.ASTRA, "high", astra_required=True),
             ],
         ) as judge:
             self.call(payload_for(opening))
@@ -309,7 +336,7 @@ class PerCallEndToEnd(unittest.TestCase):
             jev, "call_jev_routed",
             side_effect=[
                 answer(jev.SOL, "medium", lease="user_turn"),
-                answer(jev.TERRA, "medium", lease="user_turn"),
+                answer(jev.SOL, "medium", lease="user_turn"),
                 answer(jev.LUNA, "low"),
             ],
         ) as judge:
@@ -378,28 +405,28 @@ class PerCallEndToEnd(unittest.TestCase):
         self.assertEqual(second_state["cache_state"]["models"]["sol"]["read_pct"], 80.0)
         self.assertEqual(self.records[1]["cache_state"]["last_model"], "sol")
 
-    def test_mandatory_review_policy_forces_astra_without_changing_replay(self):
-        history = [message("user", "Review this code for security and performance.")]
+    def test_specialist_policy_forces_astra_without_changing_replay(self):
+        history = [message("user", "Build the interactive 3D scene and inspect it on the desktop.")]
         sent = payload_for(history)
         with mock.patch.object(
             jev,
             "call_jev_routed",
-            return_value=answer(jev.TERRA, "high", astra_required=True),
+            return_value=answer(jev.SOL, "high", astra_required=True),
         ):
             self.call(sent)
         self.assertEqual(Edge.payloads[-1]["model"], jev.ASTRA)
         self.assertEqual(Edge.payloads[-1]["input"], history)
         self.assertEqual(self.records[-1]["gate"], "astra_policy")
-        self.assertEqual(self.records[-1]["base_tier"], jev.TERRA)
+        self.assertEqual(self.records[-1]["base_tier"], jev.SOL)
 
-    def test_checkpoint_then_final_review_then_fix_routes_each_phase(self):
+    def test_ordinary_review_then_heavy_development_then_fix_routes_each_phase(self):
         # Stubbed semantic decisions test wiring, not Jev classification accuracy.
-        history = [message("user", "Implement the change, then get an independent final review.")]
+        history = [message("user", "Review the plan, build the 3D engine, then fix the small findings.")]
         phases = [
-            ("Run an in-progress quality checkpoint.", answer(jev.TERRA, "medium")),
-            ("Scores look good; independent final review is still required.",
-             answer(jev.TERRA, "high", astra_required=True)),
-            ("Final review complete. Fix its established finding.",
+            ("Run an ordinary final code review.", answer(jev.SOL, "medium")),
+            ("Build and debug the multi-component 3D engine.",
+             answer(jev.SOL, "xhigh", astra_required=True)),
+            ("Heavy development complete. Fix the established finding.",
              answer(jev.SOL, "high")),
         ]
         with mock.patch.object(
@@ -411,11 +438,13 @@ class PerCallEndToEnd(unittest.TestCase):
                 self.assertEqual(Edge.payloads[-1]["input"], history)
         self.assertEqual(judge.call_count, 3)
         self.assertEqual(
-            [p["model"] for p in Edge.payloads], [jev.TERRA, jev.ASTRA, jev.SOL]
+            [p["model"] for p in Edge.payloads], [jev.SOL, jev.ASTRA, jev.SOL]
         )
         self.assertEqual(
             [r["gate"] for r in self.records], ["apply", "astra_policy", "apply"]
         )
+        self.assertEqual([p["reasoning"]["effort"] for p in Edge.payloads],
+                         ["medium", "xhigh", "high"])
 
     def test_compaction_gets_a_new_decision_and_full_handoff(self):
         opening = [message("user", "refactor the router tests"),

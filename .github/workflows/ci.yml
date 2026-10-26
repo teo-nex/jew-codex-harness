@@ -69,6 +69,8 @@ jobs:
         timeout-minutes: 3
         run: python ../tests/idle_compact_acceptance.py --tui
       - run: npm ci
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
       - name: Offline Jev configuration smoke
         run: python ../scripts/smoke_config_offline.py
       - name: Static checks

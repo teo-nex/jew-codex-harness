@@ -5,10 +5,13 @@ import os
 from pathlib import Path
 import stat
 import re
+import tempfile
 import urllib.error
 import urllib.request
 
-MODEL = "jev-1.13.0"
+from server.decision_contract import REQUEST_MODEL, compatible_model
+
+MODEL = REQUEST_MODEL
 URL = "https://api.typesafe.ai/v1/systemone"
 def local_url():
     home = Path(os.environ.get("CODEX_HOME", str(Path.home() / ".codex")))
@@ -22,11 +25,11 @@ def local_url():
 
 
 LOCAL_URL = local_url()
-RUBRIC_VERSION = "worker-v2"
+RUBRIC_VERSION = "worker-v3-luna6-small-edits"
 TASK_QUESTION = {"type": "choice", "instructions": "Classify this request by the strongest capability required. A short prompt can still need research or repo work; use simple only when one brief answer needs no tools or current facts.", "criteria": {
     "mechanical": "Exact, deterministic file or command operation with no semantic judgment",
     "simple": "One self-contained question answered briefly without repository work, tools, or current external facts",
-    "routine": "Localized coding or diagnosis with clear acceptance criteria",
+    "routine": "Only a small unambiguous localized code edit with clear acceptance criteria and no design choice",
     "complex": "Cross-file design, uncertain behavior, or difficult debugging",
     "unclear": "Goal, ownership, or acceptance is too ambiguous to execute safely",
 }}
@@ -67,6 +70,25 @@ def local_router_key():
     return path.read_text().strip()
 
 
+def _validate_answers(response, questions):
+    if not isinstance(response, dict) or not compatible_model(response.get("model")):
+        raise ValueError("Unexpected Jev model or response")
+    answers = response.get("answers")
+    if not isinstance(answers, dict) or set(answers) != set(questions):
+        raise ValueError("Incomplete Jev answers")
+    for name, question in questions.items():
+        answer = answers[name]
+        if not isinstance(answer, dict) or answer.get("type") != question["type"]:
+            raise ValueError("Invalid Jev answer type")
+        if question["type"] == "choice":
+            if answer.get("choice") not in question["criteria"]:
+                raise ValueError("Invalid Jev choice")
+            confidence = answer.get("confidence")
+            if isinstance(confidence, bool) or not isinstance(confidence, (float, int)) or not 0 <= confidence <= 1:
+                raise ValueError("Invalid Jev confidence")
+    return answers
+
+
 def judgment(root, state, questions, cache_dir, transport=None):
     """Return typed answers and separate usage, or an unavailable marker."""
     payload = {"state": state, "model": MODEL, "questions": questions}
@@ -75,9 +97,9 @@ def judgment(root, state, questions, cache_dir, transport=None):
     if cache.exists():
         try:
             value = json.loads(cache.read_text())
-            if value.get("model") == MODEL and isinstance(value.get("answers"), dict):
-                return {**value, "cache_hit": True, "original_usage": value.get("usage"),
-                        "usage": {"input_tokens": 0, "output_tokens": 0}, "usage_source": "local_cache"}
+            _validate_answers(value, questions)
+            return {**value, "cache_hit": True, "original_usage": value.get("usage"),
+                    "usage": {"input_tokens": 0, "output_tokens": 0}, "usage_source": "local_cache"}
         except (OSError, ValueError):
             pass
     try:
@@ -101,28 +123,25 @@ def judgment(root, state, questions, cache_dir, transport=None):
                 if error.code in (502, 503, 504) and attempt == 0:
                     continue
                 raise
-        if not isinstance(response, dict) or response.get("model") != MODEL:
-            raise ValueError("Unexpected Jev model or response")
-        answers = response.get("answers")
-        if not isinstance(answers, dict) or set(answers) != set(questions):
-            raise ValueError("Incomplete Jev answers")
-        for name, question in questions.items():
-            answer = answers[name]
-            if not isinstance(answer, dict) or answer.get("type") != question["type"]:
-                raise ValueError("Invalid Jev answer type")
-            if question["type"] == "choice":
-                if answer.get("choice") not in question["criteria"]:
-                    raise ValueError("Invalid Jev choice")
-                confidence = answer.get("confidence")
-                if not isinstance(confidence, (float, int)) or not 0 <= confidence <= 1:
-                    raise ValueError("Invalid Jev confidence")
+        answers = _validate_answers(response, questions)
         usage = response.get("usage")
-        value = {"model": MODEL, "answers": answers, "usage": usage if isinstance(usage, dict) else None,
+        value = {"model": response["model"], "answers": answers, "usage": usage if isinstance(usage, dict) else None,
                  "usage_source": "typesafe_response" if isinstance(usage, dict) else "unknown", "cache_hit": False}
-        cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-        with cache.open("x") as output:
-            os.chmod(cache, 0o600)
-            json.dump(value, output)
+        # A concurrent identical decision or an invalid old cache must not turn
+        # a valid provider answer into an unavailable result.
+        try:
+            cache.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+            with tempfile.NamedTemporaryFile(mode="w", dir=cache.parent, delete=False) as output:
+                temporary = Path(output.name)
+                try:
+                    os.chmod(temporary, 0o600)
+                    json.dump(value, output)
+                    output.close()
+                    os.replace(temporary, cache)
+                finally:
+                    temporary.unlink(missing_ok=True)
+        except OSError:
+            pass  # A cache failure cannot invalidate a typed provider answer.
         return value
     except (OSError, ValueError, KeyError, urllib.error.URLError, TimeoutError) as error:
         return {"unavailable": type(error).__name__, "usage": None, "usage_source": "unknown", "cache_hit": False}

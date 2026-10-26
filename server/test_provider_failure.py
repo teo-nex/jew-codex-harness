@@ -31,17 +31,17 @@ class FailureTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as root:
             ladder = Ladder(CONFIG, Path(root) / "state.json")
             with mock.patch("provider_ladder.time.time", return_value=1000):
-                first = ladder.route("one", "gpt-6-sol", "high")
+                first = ladder.route("one", "gpt-6.1-sol", "high")
                 ladder.advance("one", first, "auth", cooldown_seconds=900)
-                other = ladder.route("other", "gpt-6-sol", "low")
+                other = ladder.route("other", "gpt-6.1-sol", "low")
                 self.assertEqual(other["account"], "a2")
                 ladder.advance("other", other, "unavailable", cooldown_seconds=30)
-                route = ladder.route("fresh", "gpt-6-sol", "low")
+                route = ladder.route("fresh", "gpt-6.1-sol", "low")
                 self.assertEqual(route["stage"], "second")
             with mock.patch("provider_ladder.time.time", return_value=1031):
-                self.assertEqual(ladder.route("fresh", "gpt-6-sol", "low")["account"], "a2")
+                self.assertEqual(ladder.route("fresh", "gpt-6.1-sol", "low")["account"], "a2")
             with mock.patch("provider_ladder.time.time", return_value=1901):
-                self.assertEqual(ladder.route("new", "gpt-6-sol", "low")["account"], "a1")
+                self.assertEqual(ladder.route("new", "gpt-6.1-sol", "low")["account"], "a1")
 
     def test_bad_payload_does_not_exhaust_or_retry_healthy_accounts(self):
         with tempfile.TemporaryDirectory() as root:
@@ -58,10 +58,10 @@ class FailureTests(unittest.TestCase):
             with mock.patch.object(jev, "_provider_ladder", return_value=ladder), \
                  mock.patch.object(jev, "_omniroute_key", return_value="fixture"), \
                  mock.patch.object(jev, "log_line"):
-                handler._serve_ladder({"input": "fixture"}, "scope", "gpt-6-sol", "high",
+                handler._serve_ladder({"input": "fixture"}, "scope", "gpt-6.1-sol", "high",
                                       None, {"step_type": "user_turn"}, None, True, False)
             self.assertEqual(handler._forward.call_count, 1)
-            self.assertEqual(ladder.route("scope", "gpt-6-sol", "high")["account"], "a1")
+            self.assertEqual(ladder.route("scope", "gpt-6.1-sol", "high")["account"], "a1")
             self.assertEqual(handler._attempts[0]["failure_class"], "bad_request")
 
     def test_exhausted_thread_can_recover_secondary_before_primary(self):
@@ -69,18 +69,18 @@ class FailureTests(unittest.TestCase):
             config = {"providers": [{"id": "first", "model": "a"}, {"id": "second", "model": "b"}]}
             ladder = Ladder(config, Path(root) / "state.json")
             with mock.patch("provider_ladder.time.time", return_value=1000):
-                route = ladder.route("scope", "gpt-6-sol", "high")
+                route = ladder.route("scope", "gpt-6.1-sol", "high")
                 ladder.advance("scope", route, "auth", cooldown_seconds=900)
-                route = ladder.route("scope", "gpt-6-sol", "high")
+                route = ladder.route("scope", "gpt-6.1-sol", "high")
                 ladder.advance("scope", route, "timeout", cooldown_seconds=30)
-                self.assertEqual(ladder.route("scope", "gpt-6-sol", "high")["stage"], "exhausted")
+                self.assertEqual(ladder.route("scope", "gpt-6.1-sol", "high")["stage"], "exhausted")
             with mock.patch("provider_ladder.time.time", return_value=1031):
-                self.assertEqual(ladder.route("scope", "gpt-6-sol", "high")["stage"], "second")
+                self.assertEqual(ladder.route("scope", "gpt-6.1-sol", "high")["stage"], "second")
 
     def test_missing_model_skips_all_accounts_not_other_destination(self):
         with tempfile.TemporaryDirectory() as root:
             ladder = Ladder(CONFIG, Path(root) / "state.json")
             with mock.patch("provider_ladder.time.time", return_value=1000):
-                route = ladder.route("one", "gpt-6-sol", "high")
+                route = ladder.route("one", "gpt-6.1-sol", "high")
                 ladder.advance("one", route, "model_unavailable", cooldown_seconds=300)
-                self.assertEqual(ladder.route("fresh", "gpt-6-sol", "high")["stage"], "second")
+                self.assertEqual(ladder.route("fresh", "gpt-6.1-sol", "high")["stage"], "second")

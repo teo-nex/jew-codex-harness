@@ -99,6 +99,31 @@ class WindowsServiceTests(unittest.TestCase):
             with self.assertRaises(FileExistsError):
                 windows.install_service(self.plan, dry_run=False)
 
+    def test_failed_registration_can_remove_its_owned_local_artifacts(self):
+        for name, data in windows.service_files(self.plan).items():
+            path = Path(name)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(data)
+        with patch.object(windows, "service_status", return_value={
+                "installed": False, "owned": False, "active": False}), \
+             patch.object(windows.subprocess, "run") as run:
+            windows.remove_service(self.plan, dry_run=False)
+        run.assert_not_called()
+        self.assertFalse(Path(self.plan["definition_path"]).exists())
+        self.assertFalse(Path(self.plan["wrapper_path"]).exists())
+
+    def test_failed_registration_does_not_remove_foreign_local_artifacts(self):
+        path = Path(self.plan["wrapper_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("foreign")
+        with patch.object(windows, "service_status", return_value={
+                "installed": False, "owned": False, "active": False}), \
+             patch.object(windows.subprocess, "run") as run:
+            with self.assertRaises(FileExistsError):
+                windows.remove_service(self.plan, dry_run=False)
+        run.assert_not_called()
+        self.assertEqual(path.read_text(), "foreign")
+
     def test_state_acl_is_applied_to_the_exact_directory(self):
         state = Path(self.plan["state_dir"])
         state.mkdir()

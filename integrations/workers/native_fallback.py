@@ -127,7 +127,7 @@ def wait_composer(bridge, binding, seconds=20):
         time.sleep(0.25)
     raise RuntimeError("Native composer did not become ready")
 
-NATIVE_WORKER_MODELS = {"gpt-6-luna", "gpt-5.6-luna", "gpt-5.6-terra"}
+NATIVE_WORKER_MODELS = {"gpt-6-luna"}
 
 
 def choose_model_effort(bridge, binding, model="gpt-6-luna", effort="medium"):

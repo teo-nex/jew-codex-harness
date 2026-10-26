@@ -133,6 +133,17 @@ class PortableReportPathTests(unittest.TestCase):
         self.assertIn("Оценка частичная", summary)  # fixture starts after window start
         self.assertIn("synthetic-digest", summary)
 
+    def test_sol61_attempt_is_not_relabelled_or_priced_as_sol6(self):
+        log = self.base / "sol61.jsonl"
+        log.write_text(json.dumps({"at": "2026-09-24T18:00:00+03:00", "gate": "jev",
+            "attempts": [{"model": "native/gpt-6.1-sol-high", "speed": "default",
+                          "usage": {"input_tokens": 1000, "output_tokens": 100}}]}) + "\n")
+        result = api_cost.report(24, routing_log=log, gonka_prices={},
+                                now=datetime(2026, 9, 24, 19, 51, tzinfo=ZoneInfo("Europe/Moscow")))
+        self.assertIn("gpt-6.1-sol", result["by_model"])
+        self.assertEqual(result["by_model"]["gpt-6.1-sol"]["unpriced"], 1)
+        self.assertEqual(result["priced_attempts"], 0)
+
     def test_saved_report_reprints_without_fetching_prices(self):
         saved = self.base / "report.json"
         saved.write_text(json.dumps({"as_of": "2026-09-24T19:51:00+03:00", "window_hours": 24,

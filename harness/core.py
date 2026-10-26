@@ -327,7 +327,7 @@ _MANAGED_FILES = ("config.toml", "hooks.json", "AGENTS.md", "jev-global/ui.mjs",
                   "skills/jev-worker-orchestration/SKILL.md", "jev-harness/ladder-config.json")
 _MUTABLE_HOST_FILES = {"config.toml", "hooks.json", "AGENTS.md"}
 _ROLLBACK_PHASES = {"complete", "service_removed", "router_disabled", "router_removed"}
-_LIVE_INSTALL_PHASES = {"manifest_written", "service_installed"}
+_LIVE_INSTALL_PHASES = {"manifest_written", "service_pending", "service_installed"}
 
 
 def _owned_payload(home: Path, repo: Path, relative: str) -> object:
@@ -457,7 +457,7 @@ def _read_journal(home: Path) -> dict:
                                          "chatgpt_deferred", "catalog_refreshed", "picker_configured",
                                          "config_written", "hooks_written", "ladder_written",
                                          "ui_written", "skill_written", "agents_written",
-                                         "service_installed", "manifest_written", "complete",
+                                         "service_pending", "service_installed", "manifest_written", "complete",
                                          "service_removed", "router_disabled", "router_removed", "rolled_back"}):
         raise InstallError("Installation journal ownership mismatch")
     return data
@@ -469,7 +469,14 @@ def _check_checkpoint(home: Path, plan: dict, journal: dict) -> None:
                  else _inventory)
     expected = (_expected_managed(journal, home) if journal["phase"] in _ROLLBACK_PHASES
                 else journal.get("owned"))
-    if inventory(home, Path(plan["definition_path"])) != expected:
+    current = inventory(home, Path(plan["definition_path"]))
+    if journal["phase"] == "service_pending":
+        _check_service_intent(plan, journal)
+        # Only the exact write-ahead service bytes may have appeared since
+        # manifest_written. All other owned state must still match.
+        if "@service-definition" not in expected:
+            current.pop("@service-definition", None)
+    if current != expected:
         raise InstallError("Profile changed since installation checkpoint; exact review required")
     definition = journal.get("router_definition_path")
     if definition and _digest(Path(definition)) != journal.get("router_definition_sha256"):
@@ -510,10 +517,26 @@ def _checkpoint(state: Path, home: Path, plan: dict, journal: dict, phase: str) 
     journal["phase"] = phase
     journal["owned"] = (_managed_inventory if phase in _LIVE_INSTALL_PHASES else _inventory)(
         home, Path(plan["definition_path"]))
+    if phase == "manifest_written":
+        journal["manifest_sha256"] = _digest(state / "manifest.json")
     definition = journal.get("router_definition_path")
     if definition:
         journal["router_definition_sha256"] = _digest(Path(definition))
     _journal(state, journal, previous)
+
+
+def _check_service_intent(plan: dict, journal: dict) -> None:
+    """A partial service is resumable only with its exact write-ahead bytes."""
+    module = platform_module(plan["platform"])
+    expected = {name: hashlib.sha256(data).hexdigest()
+                for name, data in module.service_files(plan).items()}
+    if journal.get("service_files") != expected:
+        raise InstallError("Service installation intent changed; exact review required")
+    for name, digest in expected.items():
+        path = Path(name)
+        if path.exists() or path.is_symlink():
+            if _digest(path) != digest:
+                raise InstallError("Service installation file changed; exact review required")
 
 
 def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
@@ -547,7 +570,8 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
 
     def install_service():
         status = ctx["platform"].service_status(plan)
-        if status["installed"] or status["active"]:
+        if (status["installed"] or status["active"]) and not (
+                journal["phase"] == "service_pending" and status.get("owned")):
             raise InstallError("Service appeared before its installation checkpoint; exact review required")
         ctx["platform"].install_service(plan, dry_run=False)
 
@@ -587,11 +611,17 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
         ("service_installed", install_service),
     ]
     phases = ["router_ready"] + [name for name, _ in steps]
-    if journal["phase"] not in phases:
+    if journal["phase"] not in phases and journal["phase"] != "service_pending":
         raise InstallError("Router bootstrap is ambiguous; exact review required before continuation")
-    start = phases.index(journal["phase"])
+    start = phases.index("manifest_written" if journal["phase"] == "service_pending" else journal["phase"])
     for name, action in steps[start:]:
         _check_checkpoint(home, plan, journal)
+        if name == "service_installed" and journal["phase"] != "service_pending":
+            previous = journal.copy()
+            journal["phase"] = "service_pending"
+            journal["service_files"] = {path: hashlib.sha256(data).hexdigest()
+                                       for path, data in ctx["platform"].service_files(plan).items()}
+            _journal(state, journal, previous)
         action()
         _checkpoint(state, home, plan, journal, name)
     _check_checkpoint(home, plan, journal)
@@ -630,7 +660,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
         status = ctx_saved["platform"].service_status(service)
         if (status["installed"] or status["active"]) and not status.get("owned"):
             raise InstallError("Installed service ownership changed; refusing continuation")
-        if saved["phase"] not in {"service_installed", "complete"} \
+        if saved["phase"] not in {"service_pending", "service_installed", "complete"} \
                 and (status["installed"] or status["active"]):
             raise InstallError("Service appeared before its installation checkpoint; exact review required")
         if saved["phase"] == "service_installed" \
@@ -652,7 +682,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
                                   "auth_configured", "chatgpt_deferred", "catalog_refreshed",
                                   "picker_configured", "config_written", "hooks_written",
                                   "ladder_written", "ui_written", "skill_written",
-                                  "agents_written", "service_installed", "manifest_written"}:
+                                  "agents_written", "service_pending", "service_installed", "manifest_written"}:
             raise InstallError("Existing journal cannot be continued; exact review required")
         return _continue_install(ctx_saved, saved, os_name)
     report = doctor(repo, codex_home, ladder, omni, typesafe, port, os_name, jev_provider)
@@ -832,7 +862,8 @@ def rollback(codex_home: Path, os_name: str | None = None) -> dict:
     if journal["phase"] == "rolled_back":
         return {"service_removed": True, "router_removed": bool(journal.get("router_removed")),
                 "already_rolled_back": True, "profile_retained": str(home)}
-    if journal["phase"] not in {"complete", "service_removed", "router_disabled", "router_removed"}:
+    partial = journal["phase"] in {"manifest_written", "service_pending"}
+    if journal["phase"] not in {"complete", "service_removed", "router_disabled", "router_removed"} and not partial:
         raise InstallError("Partial install is not proven complete; retain profile and inspect journal before cleanup")
     if manifest_path.is_symlink() or not manifest_path.is_file() or _digest(manifest_path) != journal.get("manifest_sha256"):
         raise InstallError("Manifest changed; refusing rollback")
@@ -856,7 +887,19 @@ def rollback(codex_home: Path, os_name: str | None = None) -> dict:
     if plan["service_id"] != journal["service_id"] or plan["definition_path"] != journal["definition_path"]:
         raise InstallError("Service identity changed; refusing rollback")
     expected = _expected_managed(journal, home)
-    if _managed_inventory(home, Path(plan["definition_path"])) != expected:
+    if partial:
+        # Credentials and mode are part of the exact service intent; rebuild
+        # the same plan used for installation, not a default environment.
+        source_paths = journal.get("input_paths")
+        if not isinstance(source_paths, list) or len(source_paths) != 3:
+            raise InstallError("Partial installation inputs cannot be proven")
+        ladder, omni, key = (Path(value) if value is not None else None for value in source_paths)
+        ctx = inputs(repo, home, ladder, omni, key, journal["port"], os_name, jev_provider)
+        if _input_hashes(ctx) != journal.get("input_hashes"):
+            raise InstallError("Partial installation inputs changed; refusing rollback")
+        plan = ctx["service"]
+        _check_checkpoint(home, plan, journal)
+    elif _managed_inventory(home, Path(plan["definition_path"])) != expected:
         raise InstallError("Profile or service definition changed since install; refusing rollback")
     agents_path = home / "AGENTS.md"
     restored_agents = None
@@ -875,7 +918,7 @@ def rollback(codex_home: Path, os_name: str | None = None) -> dict:
         if expected_path is None or path != expected_path or _digest(path) != journal.get("router_definition_sha256"):
             raise InstallError("Embedded router service changed; refusing rollback")
         router_proven = True
-    if journal["phase"] == "complete":
+    if journal["phase"] == "complete" or partial:
         module.remove_service(plan, dry_run=False)
         previous = journal.copy()
         journal["phase"] = "service_removed"

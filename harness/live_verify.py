@@ -15,6 +15,7 @@ from typing import Any
 
 from . import core
 from .process import run_bounded
+from server.decision_contract import compatible_model
 
 
 MARKER = "JEV_LIVE_VERIFY_OK"
@@ -64,7 +65,7 @@ def verify_decision(codex_home: Path) -> dict[str, Any]:
         if not isinstance(result, dict):
             raise ValueError("invalid Jev decision envelope")
         answer = result.get("answers", {}).get("marker", {})
-        valid = (result.get("model") == "jev-1.13.0" and answer.get("type") == "choice"
+        valid = (compatible_model(result.get("model")) and answer.get("type") == "choice"
                  and answer.get("choice") == "present")
         return {"ok": valid, "status": "passed" if valid else "failed",
                 "reason": "typed Jev decision returned" if valid else "invalid typed Jev decision"}

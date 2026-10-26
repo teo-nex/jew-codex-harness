@@ -36,8 +36,9 @@ class ReplayPolicy(unittest.TestCase):
         pair = routing_policy.route_choice(routing_policy.LUNA, "low")
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.write_session(root, "supported", routing_policy.SOL, 1_000_000)
+            self.write_session(root, "supported", "gpt-6-sol", 1_000_000)
             self.write_session(root, "unsupported", "unknown-model", 1_000_000_000)
+            self.write_session(root, "unpriced_sol61", routing_policy.SOL, 1_000_000)
             result = root / "result.json"
             with mock.patch.object(backtest, "SESS_ROOT", str(root)), \
                  mock.patch.object(backtest, "RESULT_PATH", str(result)), \
@@ -53,9 +54,10 @@ class ReplayPolicy(unittest.TestCase):
             self.assertEqual(judge.call_args.args[2]["questions"], routing_policy.QUESTIONS)
             data = json.loads(result.read_text())
             self.assertEqual(data["turns"], 1)
-            self.assertEqual(data["skipped_turns"], 1)
+            self.assertEqual(data["skipped_turns"], 2)
             self.assertEqual(data["jev_usd"], 0.1)
-            self.assertEqual(data["scenarios_usd"][routing_policy.SOL], 2.0)
+            self.assertEqual(data["scenarios_usd"]["gpt-6-sol"], 2.0)
+            self.assertNotIn(routing_policy.SOL, data["scenarios_usd"])
             self.assertEqual(data["policy_version"], routing_policy.POLICY_VERSION)
 
     def test_identical_short_replies_do_not_share_different_contexts(self):
@@ -65,7 +67,7 @@ class ReplayPolicy(unittest.TestCase):
     def test_turns_keep_the_model_selected_when_they_were_measured(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
-            self.write_session(root, "first", routing_policy.SOL, 1_000_000)
+            self.write_session(root, "first", "gpt-6-sol", 1_000_000)
             self.write_session(root, "second", routing_policy.LUNA, 1_000_000)
             folder = root / "2026/09/20"
             first, second = folder / "first.jsonl", folder / "second.jsonl"
@@ -76,14 +78,14 @@ class ReplayPolicy(unittest.TestCase):
                  mock.patch.object(backtest, "RESULT_PATH", str(result)), \
                  mock.patch.object(backtest.poc, "load_key", return_value="fixture"), \
                  mock.patch.object(backtest.poc, "post_json", return_value={"answers": {
-                     "astra_policy": {"choice": "normal"},
-                     "model": {"choice": "luna"}, "effort": {"choice": "low"},
+                     "astra_policy": {"choice": "normal", "confidence": 0.95},
+                     "model": {"choice": "luna", "confidence": 0.95}, "effort": {"choice": "low"},
                      "lease": {"choice": "one_call"}}}), \
                  mock.patch("sys.argv", ["backtest"]), contextlib.redirect_stdout(io.StringIO()):
                 self.assertEqual(backtest.main(), 0)
             data = json.loads(result.read_text())
             self.assertEqual(data["actual_models"],
-                             {routing_policy.SOL: 1, routing_policy.LUNA: 1})
+                             {"gpt-6-sol": 1, routing_policy.LUNA: 1})
             self.assertEqual(data["actual_usd"], 2.1)
 
     def test_shadow_uses_live_projection_and_retains_short_confirmations(self):

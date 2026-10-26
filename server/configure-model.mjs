@@ -14,8 +14,11 @@ export const JEV_MODEL = Object.freeze({
   listed: true,
   displayName: "Jev Codex Router",
   description:
-    "Auto-routing by Jev (TypeSafe): every call is served by luna, terra, sol or astra at the thinking depth it needs.",
+    "Jev automatically selects both model and reasoning depth for each task phase; provider fallbacks follow the configured ladder.",
   priority: 95,
+  // Internal compatibility metadata for the registry and bypass modes. The
+  // published jev/auto catalog omits manual effort controls; normal routing
+  // uses the depth chosen by Jev, regardless of the client's saved setting.
   defaultEffort: "medium",
   reasoningLevels: [
     { effort: "low", description: "Quick reasoning" },

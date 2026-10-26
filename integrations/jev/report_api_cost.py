@@ -68,6 +68,8 @@ class Rate:
     openai: bool = False
 
 
+# Historical price cards and counterfactual baselines, not routing choices.
+# No Sol 6.1 price is inferred from Sol 6; new attempts remain unpriced.
 OPENAI = {
     "gpt-6-luna": ("0.10", "0.01", "0.50", "0.125"),
     "gpt-6-sol": ("2.00", "0.20", "10.00", "2.50"),
@@ -82,7 +84,7 @@ NEXT_NATIVE = {"gpt-6-luna": "gpt-6-sol", "gpt-6-sol": "gpt-6-astra",
 
 def canonical_model(model):
     leaf = str(model or "").split("/")[-1]
-    match = re.fullmatch(r"(gpt-(?:6|5\.6)-(?:luna|terra|sol|astra))(?:-(?:low|medium|high|xhigh|max))?", leaf)
+    match = re.fullmatch(r"(gpt-(?:6(?:\.1)?|5\.6)-(?:luna|terra|sol|astra))(?:-(?:low|medium|high|xhigh|max))?", leaf)
     return match.group(1) if match else str(model or "")
 
 

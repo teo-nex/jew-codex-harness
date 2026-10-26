@@ -36,7 +36,7 @@ class ProjectPolicyTests(unittest.TestCase):
         self.assertTrue(final_required(policy, {}, {"astra_policy": "astra"}))
         restricted = restrict(config, policy, True)
         self.assertEqual([p["id"] for p in restricted["providers"]], ["native"])
-        restricted["providers"][0]["model"] = "gpt-6-sol"
+        restricted["providers"][0]["model"] = "gpt-6.1-sol"
         with self.assertRaises(ValueError):
             restrict(restricted, policy, True)
 
@@ -64,4 +64,4 @@ class ProjectPolicyTests(unittest.TestCase):
              mock.patch.object(jev, "call_jev_routed") as decision:
             handler._post()
         decision.assert_not_called()
-        self.assertEqual(handler._serve_ladder.call_args.args[2], "gpt-6-astra")
+        self.assertEqual(handler._serve_ladder.call_args.args[2], "gpt-6.1-sol")

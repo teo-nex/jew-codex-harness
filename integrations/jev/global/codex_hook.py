@@ -56,7 +56,6 @@ UI_RAW = re.compile(
 )
 EXTERNAL_WRITE = re.compile(r"(?:^|__)(?:delete|remove|erase|send|post|publish|upload|share|grant|revoke|pay|buy|purchase|create|update|edit|write|move|rename)(?:_|$)", re.I)
 UI_READ = re.compile(r"(?:get_app_state|list_apps|screenshot|snapshot|read|list|documentation)", re.I)
-UI_JEV_ACTION = re.compile(r"\bsafe(?:Browser|Computer)(?:Click|SetValue)\s*\(")
 READ_MCP = re.compile(r"(?:^|__)(?:read|list|get|search|fetch|status|inspect|snapshot|screenshot|describe|lookup)(?:_|$)", re.I)
 SIMPLE_SKY_READ = re.compile(r"\AnodeRepl\.write\(\(await sky\.get_app_state\(\{[^{};]*\}\)\)\.text\)\Z")
 CONTINUE = re.compile(r"(?i)^(?:продолжай|продолжаем|дальше|делай|сделай это|да|ок|окей|continue|go on|do it)[.!\s]*$")
@@ -344,13 +343,25 @@ def ask_jev(state, questions, timeout=4):
     return None
 
 
+METRIC_MAX_BYTES = 2 * 1024 * 1024
+
+
 def log_metric(kind, **fields):
     try:
         STATE.mkdir(parents=True, exist_ok=True, mode=0o700)
         STATE.chmod(0o700)
-        with (STATE / "usage.jsonl").open("a") as out:
+        path = STATE / "usage.jsonl"
+        line = json.dumps({"at": int(time.time()), "kind": kind, **fields}) + "\n"
+        if len(line.encode()) > METRIC_MAX_BYTES:
+            return
+        try:
+            if path.stat().st_size + len(line.encode()) > METRIC_MAX_BYTES:
+                os.replace(path, path.with_suffix(".jsonl.1"))
+        except FileNotFoundError:
+            pass
+        with path.open("a") as out:
             os.chmod(out.name, 0o600)
-            out.write(json.dumps({"at": int(time.time()), "kind": kind, **fields}) + "\n")
+            out.write(line)
     except OSError:
         pass
 
@@ -951,8 +962,8 @@ def pre_tool(event):
             return deny("Use the Jev browser/computer action helper; direct UI actions are blocked.")
         if re.search(r"\b(?:fs\.)?(?:rmSync|unlinkSync|rmdirSync)\s*\(", code):
             return deny("Direct deletion through the UI runtime is blocked.")
-        if UI_JEV_ACTION.search(code):
-            return None  # trusted helper performs its own live Jev decision
+        # A helper name in a comment/string, a shadowed function, or a real
+        # helper next to another write cannot authorize an entire JS block.
         if readonly_node_repl(code):
             return None
         allowed, reason = jev_allows(event.get("session_id"), name, value)
@@ -997,7 +1008,7 @@ def pre_tool(event):
         allowed, reason = jev_allows(event.get("session_id"), name, value)
         return None if allowed else deny(reason)
     threshold = 0.90
-    if name == "Bash":
+    if name in ("Bash", "exec_command", "shell_command"):
         command = str(value.get("command") or value.get("cmd") or "")
         if SHELL_CODEX_EXEC.search(command):
             return deny("Start subagents through jev-workers MCP, not a nested codex exec.")
@@ -1015,8 +1026,6 @@ def pre_tool(event):
         valid, threshold = owned_patch_policy(event.get("session_id"), patch_text)
         if not valid:
             return deny("Patch target is outside this worker's allowed_files.")
-        if threshold == "authorized_canvastty_css":
-            return None
         if threshold == 0.80:
             allowed, reason = review_owned_patch(event.get("session_id"), patch_text)
             return None if allowed else deny(reason)

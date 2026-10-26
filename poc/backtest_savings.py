@@ -25,7 +25,8 @@ _spec.loader.exec_module(poc)
 SESS_ROOT = os.path.expanduser("~/.codex/sessions")
 RESULT_PATH = os.path.expanduser("~/.codex/codex-router/jev-backtest.json")
 
-# Prices per 1M tokens (short context, OpenAI API page, Sep 2026)
+# Historical prices per 1M tokens (short context, OpenAI API page, Sep 2026).
+# Sol 6.1 has no verified price here; those turns are skipped, never priced as Sol 6.
 PRICES = {
     "gpt-6-astra":   (10.00, 50.00, 1.00, 12.50),   # (input, output, cached_in, cache_write)
     "gpt-6-sol":     (2.00, 10.00, 0.20, 2.50),

@@ -11,7 +11,7 @@ class CatalogTests(unittest.TestCase):
 
     def test_missing_and_alias_family_are_warned_without_identity_claim(self):
         config = {"providers": [{"id": "plus", "transport": "omniroute",
-                                 "models": {"gpt-6-sol": "codex/gpt-5.6-sol-high", "gpt-6-astra": "absent"}}]}
+                                 "models": {"gpt-6.1-sol": "codex/gpt-5.6-sol-high", "gpt-6-astra": "absent"}}]}
         rows = catalog.normalize({"data": [{"id": "codex/gpt-5.6-sol-high", "secret": "must-not-print"}]})
         self.assertNotIn("secret", str(rows))
         self.assertEqual({w["warning"] for w in catalog.warnings(config, rows)},

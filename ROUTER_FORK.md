@@ -30,6 +30,17 @@ service never pulls or updates another repository by itself.
 
 ## Maintained fixes
 
+- The `jev/auto` catalog omits manual reasoning-effort controls because Jev
+  selects both model and depth. Other models retain their declared effort
+  ladders. An isolated catalog smoke and loopback request tests verify the
+  publication and that saved client effort does not override a Jev decision.
+
+- Credential discovery changes made by the control CLI are read by the running
+  router. A process-local cache previously kept signed Codex requests failing
+  with 401 after discovery was enabled and delayed discovery revocation until
+  restart. A loopback-only regression test toggles discovery from a separate
+  process and verifies both authorization and revocation without session sharing.
+
 - Owner-signal handlers are installed before spawning a process tree. This
   prevents a descheduled intermediate owner from being terminated before it
   can forward the signal and wait for a descendant's rollback barrier. The

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import http from "node:http";
 import os from "node:os";
@@ -35,7 +35,7 @@ async function nativeRecorder() {
   return { server, port, hits };
 }
 
-function run(env) {
+function run(env, prepare = () => {}) {
   const testRoot = mkdtempSync(path.join(os.tmpdir(), "codex-router-idle-"));
   const stateDir = path.join(testRoot, "state");
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -45,6 +45,7 @@ function run(env) {
     '{"version":1,"providers":[]}\n',
     { encoding: "utf8", mode: 0o600 },
   );
+  prepare({ testRoot, stateDir });
   const child = spawn(process.execPath, [path.join(root, "src", "router.mjs")], {
     cwd: root,
     env: {
@@ -164,6 +165,82 @@ test("hiding every provider without --no-discovery keeps native passthrough work
     const turn = await post(routerPort, "/responses", { model: "gpt-5", input: "hello" });
     assert.equal(turn.status, 200, await turn.text());
     assert.equal(native.hits.length, 1, "the native turn never reached the native base");
+  } finally {
+    await stopChild(child);
+    gateway.server.close();
+    native.server.close();
+  }
+});
+
+test("a running signed Codex route observes discovery changes from the control process", async () => {
+  const gateway = await mockServer((request, response) => {
+    response.writeHead(200, { "Content-Type": "application/json" });
+    response.end('{"ok":true}');
+  });
+  const native = await nativeRecorder();
+  const routerPort = await openPort();
+  const token = "fixture-signed-codex-session";
+  const child = run({
+    ...routerEnv(gateway.port, routerPort, native.port),
+    CODEX_ROUTER_NO_DISCOVERY: "",
+    CODEX_ROUTER_NATIVE_SESSION_FALLBACK: "0",
+  }, ({ testRoot, stateDir }) => {
+    const home = path.join(testRoot, "codex");
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+    writeFileSync(path.join(home, "auth.json"), JSON.stringify({
+      auth_mode: "chatgpt",
+      tokens: { access_token: token, account_id: "fixture-account" },
+    }), { mode: 0o600 });
+    writeFileSync(path.join(stateDir, "discovery-mode.json"),
+      '{"version":1,"discovery":"disabled"}\n', { mode: 0o600 });
+  });
+  const turn = (bearer = token) => fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${bearer}` },
+    body: JSON.stringify({ model: "gpt-5", input: "synthetic connectivity check" }),
+  });
+  const setDiscovery = (mode) => execFileSync(process.execPath,
+    [path.join(root, "src/discovery-mode.mjs"), "set", mode], {
+      env: {
+        ...process.env,
+        CODEX_HOME: path.join(child.testRoot, "codex"),
+        MODEL_ROUTER_STATE_DIR: path.join(child.testRoot, "state"),
+        CODEX_ROUTER_NO_DISCOVERY: "",
+      },
+      stdio: "pipe",
+    });
+  try {
+    await waitFor(`http://127.0.0.1:${routerPort}/health`, child);
+    const disabled = await turn();
+    assert.equal(disabled.status, 401);
+    await disabled.text();
+    assert.deepEqual(native.hits, []);
+
+    setDiscovery("enabled");
+    const enabled = await turn();
+    assert.equal(enabled.status, 200, await enabled.text());
+    assert.equal(native.hits.length, 1, "the signed Codex turn never reached the local native stand-in");
+
+    const wrong = await turn("fixture-unrelated-session");
+    assert.equal(wrong.status, 401);
+    await wrong.text();
+    const anonymous = await fetch(`http://127.0.0.1:${routerPort}/v1/responses`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: "gpt-5", input: "hello" }),
+    });
+    assert.equal(anonymous.status, 401);
+    await anonymous.text();
+    assert.equal(native.hits.length, 1, "an unrelated bearer reached the native base");
+
+    setDiscovery("disabled");
+    const revoked = await turn();
+    assert.equal(revoked.status, 401);
+    await revoked.text();
+    const idle = await post(routerPort, "/responses", { model: "gpt-5", input: "hello" });
+    assert.equal(idle.status, 503);
+    assert.equal((await idle.json()).error.type, "router_idle_no_provider");
+    assert.equal(native.hits.length, 1, "revoked discovery still reached the native base");
   } finally {
     await stopChild(child);
     gateway.server.close();

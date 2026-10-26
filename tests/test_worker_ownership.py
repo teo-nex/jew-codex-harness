@@ -11,12 +11,20 @@ from unittest import mock
 import uuid
 
 from test_global_hook_contract import load_hook
+from integrations.jev import routing
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "integrations/workers"))
 from ownership import owned_paths, patch_allowed, readonly_command
 
 
 class WorkerOwnershipTests(unittest.TestCase):
+    def test_worker_orchestrator_uses_sol61_when_jev_is_unavailable(self):
+        task = {"goal": "Investigate the failing export", "acceptance_commands": []}
+        with mock.patch.object(routing, "task_classification", return_value={"unavailable": "fixture"}):
+            route = routing.choose_route(self.cwd, task, self.state)
+        self.assertEqual(route["model"], "gpt-6.1-sol")
+        self.assertEqual(route["reason"], "jev_unavailable")
+
     def setUp(self):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
@@ -77,7 +85,7 @@ class WorkerOwnershipTests(unittest.TestCase):
             self.assertFalse(readonly_command(command), command)
 
     def test_jev_authorizes_owned_patch_for_auto_and_concrete_model(self):
-        for model in ("jev/auto", "gpt-6-sol"):
+        for model in ("jev/auto", "gpt-6.1-sol"):
             with self.subTest(model=model), mock.patch.dict(os.environ, self.env), \
                  mock.patch.object(self.hook, "ask_jev", return_value={"answers": {
                      "authorization": {"choice": "allow", "confidence": 0.99}}}) as ask:

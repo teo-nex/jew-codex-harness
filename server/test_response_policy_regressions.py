@@ -177,7 +177,7 @@ class OffPolicyTests(unittest.TestCase):
             for effort in (None, "high"):
                 with self.subTest(policy=policy, effort=effort):
                     h, calls = self.run_off(policy, effort=effort)
-                    self.assertEqual(calls, [(jev.ASTRA, None, True)])
+                    self.assertEqual(calls, [(jev.SOL, None, True)])
                     self.assertNotIn(503, h.statuses)
 
     def test_off_fails_closed_without_configured_native_route(self):
@@ -187,7 +187,7 @@ class OffPolicyTests(unittest.TestCase):
 
     def test_off_quota_cannot_discover_external_fallbacks(self):
         h, calls = self.run_off({"no_paid_fallback": True}, quota=True)
-        self.assertEqual(calls, [(jev.ASTRA, None, True)])
+        self.assertEqual(calls, [(jev.SOL, None, True)])
         self.assertEqual(h.statuses, [429])
 
     def test_off_final_review_stays_astra_under_cap_and_shadow(self):

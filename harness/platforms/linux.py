@@ -154,6 +154,10 @@ def _systemd_quote(value: str) -> str:
     return '"' + "".join(escaped) + '"'
 
 
+def service_files(plan: dict) -> dict[str, bytes]:
+    return {plan["definition_path"]: _render(plan).encode("utf-8")}
+
+
 def install_service(plan: dict, dry_run: bool = True) -> dict:
     status = service_status(plan)
     if status["installed"] and not status["owned"]:
@@ -171,7 +175,7 @@ def install_service(plan: dict, dry_run: bool = True) -> dict:
         path.parent.mkdir(parents=True, exist_ok=True)
         _private_state_dir(Path(plan["state_dir"]), create=True)
         temporary = path.with_name(path.name + ".tmp")
-        temporary.write_text(_render(plan), encoding="utf-8")
+        temporary.write_bytes(service_files(plan)[str(path)])
         os.chmod(temporary, 0o600)
         temporary.replace(path)
         subprocess.run(["systemctl", "--user", "daemon-reload"], check=True)

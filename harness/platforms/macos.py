@@ -102,6 +102,17 @@ def service_status(plan: dict) -> dict:
             "service_id": SERVICE_ID}
 
 
+def service_files(plan: dict) -> dict[str, bytes]:
+    state_dir = Path(plan["state_dir"])
+    payload = {"Label": SERVICE_ID, "JevHarnessOwner": MARKER,
+               "ProgramArguments": plan["command"], "WorkingDirectory": plan["repo"],
+               "EnvironmentVariables": plan["env_paths"], "RunAtLoad": True,
+               "KeepAlive": True, "Umask": 0o077,
+               "StandardOutPath": str(state_dir / "router.out.log"),
+               "StandardErrorPath": str(state_dir / "router.err.log")}
+    return {plan["definition_path"]: plistlib.dumps(payload)}
+
+
 def install_service(plan: dict, dry_run: bool = True) -> dict:
     status = service_status(plan)
     if status["installed"] and not status["owned"]:
@@ -117,16 +128,10 @@ def install_service(plan: dict, dry_run: bool = True) -> dict:
             (not state_dir.is_dir() or stat.S_IMODE(state_dir.stat().st_mode) & 0o077)):
         raise PermissionError("Jev state directory must be private and must not be a symlink")
     path = Path(plan["definition_path"])
-    payload = {"Label": SERVICE_ID, "JevHarnessOwner": MARKER,
-               "ProgramArguments": plan["command"], "WorkingDirectory": plan["repo"],
-               "EnvironmentVariables": plan["env_paths"], "RunAtLoad": True,
-               "KeepAlive": True, "Umask": 0o077,
-               "StandardOutPath": str(state_dir / "router.out.log"),
-               "StandardErrorPath": str(state_dir / "router.err.log")}
     if not dry_run:
         path.parent.mkdir(parents=True, exist_ok=True)
         state_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
-        path.write_bytes(plistlib.dumps(payload))
+        path.write_bytes(service_files(plan)[str(path)])
         subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", str(path)], check=True)
     return {"action": "install_and_start", "dry_run": dry_run, **status}
 

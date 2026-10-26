@@ -21,7 +21,7 @@ identifiers; they are labels, not predefined provider names. Each entry has:
 - `id`: your route label.
 - `transport`: `omniroute` (default) or `native` (the bundled Codex router).
 - `model`: one exact destination ID for every Jev decision; or `models`: a
-  complete mapping from `gpt-6-luna`, `gpt-5.6-terra`, `gpt-6-sol` and
+  complete mapping from `gpt-6-luna`, `gpt-6.1-sol` and
   `gpt-6-astra` to exact destination IDs. Do not supply both fields.
 - `connection_ids`: optional ordered list of 1-32 unique OmniRoute account IDs.
   Omitting it lets the existing gateway choose the connection. Native routes
@@ -38,6 +38,12 @@ the mapping. See [reasoning routing](REASONING.md). Unknown support is recorded
 as unknown, not inferred from a provider name. An empty profile object is valid.
 Mixed legacy/v2 fields, duplicate IDs, partial model mappings and invalid
 reasoning profiles are rejected before installation.
+Older complete mappings may retain a `gpt-5.6-terra` key for compatibility;
+validation ignores that retired entry. Terra is not an automatic routing tier.
+Sol mapping keys must use `gpt-6.1-sol`; the retired `gpt-6-sol` key is rejected,
+so an old gateway destination is never silently reused for the new model.
+The legacy Plus adapter preserves the selected exact native model ID instead
+of rewriting Luna 6 or Sol 6.1 to an older model alias. Effort remains a payload field.
 
 ## Fallback and recovery
 
@@ -109,17 +115,18 @@ configured, an unbound session is native-only until explicitly bound.
 
 Policy switches: `native_only`, `no_paid_fallback`, `require_astra_final`, plus
 `allowed_providers` (external sequence IDs; native transport remains allowed).
-`native_only` also bypasses the external Jev classifier, choosing native Astra
+`native_only` also bypasses the external Jev classifier, choosing native Sol
 locally. Other policies restrict executing routes, not the configured Jev
 classifier. `no_paid_fallback` excludes external routes with `billing: "paid"`
 or unknown billing; `billing: "free"` and `"subscription"` are operator
 declarations, not billing verification. Actual native subscription limits remain.
 
-`require_astra_final` requires exact native `gpt-6-astra` when Jev classifies
-mandatory frontier work or the caller sets `metadata.jev_phase: "final_review"`.
+The opt-in `require_astra_final` override requires exact native `gpt-6-astra`
+when Jev selects specialist/heavy work (`astra_policy: "astra"`) or the caller
+sets `metadata.jev_phase: "final_review"`.
 There is no cheaper fallback if that route is absent/unavailable. Semantic
-recognition by Jev is not deterministic proof that every final review was
-detected; explicit phase metadata is the deterministic trigger. Off/shadow
+classification is not deterministic proof that every specialist task was
+detected; explicit phase metadata is the deterministic final-review trigger. Off/shadow
 flags cannot bypass configured project restrictions. These policies apply to
 `jev/auto`, not manually selected models in the parent client.
 ## Request budgets

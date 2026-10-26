@@ -19,14 +19,14 @@ import { DISCOVERY_MODE_PATH } from "./paths.mjs";
 // process honor the choice before the state directory exists, and tests use
 // it to pin either mode.
 
-let cached;
-
 export function discoveryDisabled() {
   const override = process.env.CODEX_ROUTER_NO_DISCOVERY;
   if (override === "1") return true;
   if (override === "0") return false;
-  if (cached === undefined) cached = readDiscoveryModeFile();
-  return cached;
+  // The control CLI writes this marker in a separate process. A process-local
+  // cache would leave an already-running router rejecting signed Codex turns
+  // after discovery is enabled, and still reading credentials after revocation.
+  return readDiscoveryModeFile();
 }
 
 function readDiscoveryModeFile() {
@@ -49,7 +49,6 @@ export function writeDiscoveryMode(disabled) {
     { version: 1, discovery: disabled ? "disabled" : "enabled" },
     { directoryMode: 0o700 },
   );
-  cached = undefined;
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

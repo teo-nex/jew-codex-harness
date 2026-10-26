@@ -79,7 +79,7 @@ class LiveVerifyTests(unittest.TestCase):
             key.write_text("fixture-local-key")
             key.chmod(0o600)
             response = mock.MagicMock(status=200)
-            response.read.return_value = json.dumps({"model": "jev-1.13.0", "answers": {
+            response.read.return_value = json.dumps({"model": "jev-1.14.0", "answers": {
                 "marker": {"type": "choice", "choice": "present"}}}).encode()
             with mock.patch.object(live_verify.core, "protected_file", return_value=key), \
                  mock.patch.object(live_verify.urllib.request, "build_opener") as build:

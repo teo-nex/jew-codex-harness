@@ -9,12 +9,12 @@ conversion: Responses in, Responses out, SSE relayed verbatim.
 
 Routing policy: Jev independently classifies the mandatory-Astra policy, chooses
 one capability tier, one thinking depth and a bounded route lease in a single
-typed request. Code combines those answers and forces Astra for pre-project
-architecture, independent final code review or risk-focused review. Routine
-quality checkpoints use ordinary capability routing. Every pair uses standard
-speed. Confidence is logged without changing other valid choices. There are no
-keyword overrides or production target proportions.
-Technical Jev failures remain fail-open to astra @medium and are logged separately.
+typed request. Luna 6 handles simple questions and small unambiguous edits;
+Sol is the default. Astra is restricted to 3D/spatial work, computer use and
+heavy development. Routine architecture questions and reviews do not force it.
+Every pair uses standard speed. Uncertain Luna choices promote to Sol/high.
+There are no keyword overrides or production target proportions.
+Technical Jev failures remain fail-open to sol @medium and are logged separately.
 
 Measured routing (v11): every user turn, error, compaction and material tool-chain
 transition is judged independently. A Jev-selected lease may reuse the exact
@@ -44,10 +44,10 @@ in the canonical request sent to the executing model. A short context-dependent
 ask such as "continue" also gets one bounded active-task summary: the goal
 envelope when present, otherwise the preceding meaningful user ask; a short
 confirmation also gets the last assistant proposal.
-Fail-open: any Jev error → astra @medium. Kill switch: file
-~/.codex/codex-router/jev-router.off → relay astra without a decision.
+Fail-open: any Jev error → sol @medium. Kill switch: file
+~/.codex/codex-router/jev-router.off → relay sol without a decision.
 Shadow: file ~/.codex/codex-router/jev-router.shadow → decide and log the
-route, but serve plain astra (quality-neutral data collection).
+route, but serve plain sol (baseline comparison).
 Debug: file ~/.codex/codex-router/jev-router.debug → dump request shapes
 (jev-router-debug.jsonl) and transport counters (jev-router-debug-stream.log).
 All POSTs require the parent's protected Jev provider credential. Diagnostic
@@ -96,7 +96,7 @@ from local_runtime import (
     private_regular, protect_logs,
 )
 
-from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL, TERRA,
+from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL,
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
@@ -214,6 +214,9 @@ TASK_CLIP_MARK = "\n[...]\n"
 CONTEXT_TASK_CHARS = 320
 CACHE_DEFAULT_TTL_S = 30 * 60
 CACHE_MAX_TTL_S = 24 * 60 * 60
+ROUTE_MAX_SCOPES = 256
+LEASE_MAX_AGE_S = 5 * 60
+LEASE_MAX_USES = 8
 CACHE_TTL_RX = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*([smhd])\s*$", re.I)
 _cache_affinity_lock = threading.Lock()
 _cache_affinity = {}
@@ -298,7 +301,7 @@ def warn_if_key_missing():
         return False
     print(
         "[jev-router] warning: Jev decision API key is not configured; "
-        "Jev decisions will fail open to astra",
+        "Jev decisions will fail open to sol",
         file=sys.stderr,
         flush=True,
     )
@@ -967,9 +970,8 @@ def _debug_shape(payload):
 
 ROUTE_GLYPHS = {
     "gpt-6-luna": ("luna", "⚡"),      # cheap tier, adaptive thinking
-    "gpt-6-sol": ("sol", "🧠"),        # reasoning workhorse
+    "gpt-6.1-sol": ("sol", "🧠"),        # reasoning workhorse
     "gpt-6-astra": ("astra", "🚀"),      # frontier
-    "gpt-5.6-terra": ("terra", "🌍"),
     "wally/glm-5.3-flash": ("wally-glm", "✨"),
 }
 TANDEM_GLYPHS = {
@@ -1012,6 +1014,17 @@ def _estimated_context_k(payload):
     return max(1, int(round(size / 4000.0)))
 
 
+def _prune_route_scopes(entries, now):
+    # Called under the corresponding lock. Expire abandoned sessions too,
+    # rather than only collecting a session when its key is requested again.
+    for key, entry in list(entries.items()):
+        if entry.get("expires_at", float("inf")) <= now:
+            entries.pop(key, None)
+    while len(entries) > ROUTE_MAX_SCOPES:
+        oldest = min(entries, key=lambda key: entries[key].get("seen_at", 0))
+        entries.pop(oldest, None)
+
+
 def cache_affinity(scope, payload, now=None):
     """Bounded measured cache evidence for one prompt-cache scope.
 
@@ -1024,6 +1037,7 @@ def cache_affinity(scope, payload, now=None):
     now = time.time() if now is None else now
     ttl = _cache_ttl_seconds(payload)
     with _cache_affinity_lock:
+        _prune_route_scopes(_cache_affinity, now)
         entry = _cache_affinity.get(scope)
         if not isinstance(entry, dict):
             return None
@@ -1105,6 +1119,9 @@ def remember_cache_model(scope, payload, model, status, usage=None, effort=None,
             "effort": effort if effort in EFFORTS else None,
         }
         entry["last_model"] = model
+        entry["seen_at"] = now
+        entry["expires_at"] = now + ttl
+        _prune_route_scopes(_cache_affinity, now)
 
 
 def _turn_fingerprint(payload):
@@ -1186,6 +1203,7 @@ def route_lease(scope, payload, step, now=None):
     fingerprint = _turn_fingerprint(payload)
     contract = _lease_contract_fingerprint(payload)
     with _route_lease_lock:
+        _prune_route_scopes(_route_leases, now)
         entry = _route_leases.get(scope)
         if not isinstance(entry, dict):
             return None
@@ -1197,6 +1215,8 @@ def route_lease(scope, payload, step, now=None):
             or not contract
             or entry.get("contract") != contract
             or now - entry.get("seen_at", 0) > _cache_ttl_seconds(payload)
+            or now - entry.get("created_at", 0) >= LEASE_MAX_AGE_S
+            or entry.get("uses", 0) >= LEASE_MAX_USES
         ):
             _route_leases.pop(scope, None)
             return None
@@ -1218,6 +1238,7 @@ def route_lease(scope, payload, step, now=None):
                 return None
             entry["tool"] = tools[-1]
         entry["seen_at"] = now
+        entry["uses"] = entry.get("uses", 0) + 1
         return dict(entry["decision"])
 
 
@@ -1248,6 +1269,11 @@ def remember_route_lease(scope, payload, step, decision, status, now=None):
         )
     }
     with _route_lease_lock:
+        previous = _route_leases.get(scope, {})
+        continuing = (previous.get("turn") == fingerprint
+                      and previous.get("contract") == contract
+                      and previous.get("decision") == preserved)
+        created = previous["created_at"] if continuing else now
         _route_leases[scope] = {
             "turn": fingerprint,
             "contract": contract,
@@ -1258,8 +1284,12 @@ def remember_route_lease(scope, payload, step, decision, status, now=None):
                 else None
             ),
             "seen_at": now,
+            "created_at": created,
+            "uses": previous.get("uses", 0) if continuing else 0,
+            "expires_at": min(created + LEASE_MAX_AGE_S, now + _cache_ttl_seconds(payload)),
             "decision": preserved,
         }
+        _prune_route_scopes(_route_leases, now)
 
 
 def route_label(model):
@@ -2205,10 +2235,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         leased = route_lease(scope, payload, step)
         if self._project_policy and self._project_policy.get("native_only"):
-            model, effort, speed, gate = ASTRA, "medium", "default", "project_native_only"
+            model, effort, speed, gate = SOL, "medium", "default", "project_native_only"
             decision_source = "project_policy"
         elif routing_off:
-            model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "off"
+            model, effort, speed, gate = SOL, None, "default", "off"
         else:
             key = load_key()
             if leased is not None:
@@ -2237,11 +2267,11 @@ class Handler(BaseHTTPRequestHandler):
                     gate = decision["gate"]
                     decision_source = "jev"
                 except Exception as exc:
-                    model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", f"jev_error:{type(exc).__name__}"
+                    model, effort, speed, gate = SOL, "medium", "default", f"jev_error:{type(exc).__name__}"
                     decision_source = "technical_fallback"
                 jev_ms = int((time.time() - jt0) * 1000)
             else:
-                model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), "medium", "default", "no_key_or_task"
+                model, effort, speed, gate = SOL, "medium", "default", "no_key_or_task"
                 decision_source = "technical_fallback"
 
         policy_native_off = routing_off and bool(self._project_policy)
@@ -2261,9 +2291,7 @@ class Handler(BaseHTTPRequestHandler):
                 return self._json(503, {"error": {"message": "No configured native route satisfies project policy"}})
 
         if (not routing_off and os.environ.get("JEV_LADDER_MODE") == "active"
-                and (self._project_policy or (not os.path.exists(SHADOW_PATH)
-                and isinstance(payload.get("prompt_cache_key"), str)
-                and payload["prompt_cache_key"].strip()))):
+                and (self._project_policy or not os.path.exists(SHADOW_PATH))):
             return self._serve_ladder(payload, scope, model, effort, decision, step,
                                       jev_usage, stream_requested, debug, t0, jev_ms,
                                       decision_source)
@@ -2273,7 +2301,7 @@ class Handler(BaseHTTPRequestHandler):
         would = None
         if shadow_enabled and not routing_off:
             would = {"model": model, "effort": effort, "speed": speed, "gate": gate}
-            model, effort, speed, gate = (SOL if os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1" else ASTRA), None, "default", "shadow(base)"
+            model, effort, speed, gate = SOL, None, "default", "shadow(base)"
 
         # ONLY while native usage is exhausted (manual flag or observed quota
         # failure), replace the OpenAI ladder with locally discovered configured

@@ -28,7 +28,7 @@ TASK_SCHEMA = {"type": "object", "required": ["request_id", "goal", "cwd", "allo
                          "items": {"type": "string", "enum": ["browser", "computer", "pdf", "documents"]}}}}
 WAIT = {"type": "number", "minimum": 0, "maximum": 50}
 TOOLS = [
-    {"name": "submit", "description": "Start one owned Codex worker on jev/auto. Jev applies Plus, sticky Gemini, Opus, Gonka GLM, Gonka DeepSeek, Wally GLM, then Luna 6.",
+    {"name": "submit", "description": "Start one owned Codex worker on jev/auto using the configured provider sequence and automatic model/reasoning policy.",
      "inputSchema": TASK_SCHEMA},
     {"name": "execute", "description": "Start an owned jev/auto worker and wait up to 50 seconds in code; use collect for longer tasks.",
      "inputSchema": {**TASK_SCHEMA, "properties": {**TASK_SCHEMA["properties"], "wait_seconds": WAIT}}},

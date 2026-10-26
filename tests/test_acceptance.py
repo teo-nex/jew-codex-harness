@@ -43,7 +43,7 @@ class AcceptanceTests(unittest.TestCase):
                  mock.patch.object(acceptance.live_verify, "verify_manual", return_value={"ok": True}), \
                  mock.patch.object(acceptance.explain, "latest", return_value=evidence) as explain, \
                  mock.patch.object(smoke, "run_probe", return_value=probe) as request:
-                report = acceptance.run(profile, profile, live=True, manual_model="gpt-6-sol",
+                report = acceptance.run(profile, profile, live=True, manual_model="gpt-6.1-sol",
                                         gateway_model="fixture/model", auth=auth)
                 self.assertTrue(report["live"]["ok"])
                 self.assertEqual(request.call_count, 4)
@@ -52,7 +52,7 @@ class AcceptanceTests(unittest.TestCase):
                 self.assertNotIn('"key"', json.dumps(report))
                 explain.assert_called_with(profile.resolve(), "fresh")
                 evidence["found"] = False
-                self.assertFalse(acceptance.run(profile, profile, live=True, manual_model="gpt-6-sol",
+                self.assertFalse(acceptance.run(profile, profile, live=True, manual_model="gpt-6.1-sol",
                                                gateway_model="fixture/model", auth=auth)["live"]["ok"])
 
     def test_unprotected_auth_is_rejected_before_first_model_request(self):
@@ -60,7 +60,7 @@ class AcceptanceTests(unittest.TestCase):
              mock.patch.object(acceptance.live_verify, "verify_decision") as request:
             with self.assertRaisesRegex(core.InstallError, "shared auth"):
                 acceptance.run(Path("."), Path("missing"), live=True,
-                               manual_model="gpt-6-sol", gateway_model="fixture/model", auth=Path("fixture"))
+                               manual_model="gpt-6.1-sol", gateway_model="fixture/model", auth=Path("fixture"))
         request.assert_not_called()
 
     def test_recovery_runner_rejects_bad_report_and_does_not_echo_stderr(self):

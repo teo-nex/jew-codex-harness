@@ -45,7 +45,7 @@ class LadderForwardTests(unittest.TestCase):
                                        "prompt_cache_key": "thread"}, "scope", jev.LUNA,
                                       "low", None, {"step_type": "user_turn"}, None,
                                       True, False)
-            self.assertEqual(calls, ["codex/gpt-5.6-luna-low"])
+            self.assertEqual(calls, ["gpt-6-luna"])
             self.assertEqual(handler.wfile.getvalue(), b"")
             self.assertEqual(logged.call_args.args[0]["ladder_stage"], "stream_incomplete")
 
@@ -308,7 +308,7 @@ class LadderForwardTests(unittest.TestCase):
                 handler._serve_ladder(payload, "scope-one", jev.LUNA, "low", None,
                                       {"step_type": "user_turn"}, None, True, False)
             self.assertEqual([row["model"] for row in calls],
-                             ["codex/gpt-5.6-luna-low", "antigravity/gemini"])
+                             ["gpt-6-luna", "antigravity/gemini"])
             self.assertEqual([row["account"] for row in calls], ["plus-id", "gemini-one"])
             self.assertEqual(calls[0]["input"], calls[1]["input"])
             self.assertEqual(ladder.route("scope-one", jev.SOL, "high")["account"], "gemini-one")

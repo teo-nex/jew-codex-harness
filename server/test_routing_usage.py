@@ -18,7 +18,7 @@ class Usage(unittest.TestCase):
 
     def test_terra_attempt_uses_the_published_credit_rate(self):
         result = report.measured_usage([{"attempts": [{
-            "model": j.TERRA, "speed": "default",
+            "model": report.TERRA, "speed": "default",
             "usage": {"input_tokens": 1000, "cached_input_tokens": 500, "output_tokens": 10},
         }]}])
         self.assertEqual(result["native_attempts"], 1)
@@ -50,14 +50,14 @@ class Usage(unittest.TestCase):
     def test_reasoning_is_not_billed_twice(self):
         usage = {"input_tokens": 1_000_000, "cached_input_tokens": 800_000,
                  "output_tokens": 100_000, "reasoning_tokens": 90_000}
-        self.assertEqual(report.token_credits(j.SOL, usage), 39.0)
+        self.assertEqual(report.token_credits(report.SOL, usage), 39.0)
         self.assertEqual(report.token_credits(j.LUNA, usage), 1.95)
 
     def test_retries_count_and_external_fallback_does_not_inflate_native_savings(self):
         usage = {"input_tokens": 1_000_000, "cached_input_tokens": 0, "output_tokens": 0}
         entries = [{"attempts": [
             {"model": j.LUNA, "speed": "default", "status": 500, "usage": usage},
-            {"model": j.SOL, "speed": "default", "status": 200, "usage": usage},
+            {"model": report.SOL, "speed": "default", "status": 200, "usage": usage},
             {"model": j.ASTRA, "speed": "default", "status": 429, "usage": None},
             {"model": "external", "speed": "default", "status": 200, "usage": usage},
         ]}, {"model": j.LUNA}]
@@ -71,11 +71,21 @@ class Usage(unittest.TestCase):
         self.assertEqual(result["all_astra_credits"], 500.0)
 
     def test_historical_fast_calls_keep_their_api_surcharge(self):
-        for model in j.TIERS:
+        for model in (j.LUNA, report.SOL, j.ASTRA):
             self.assertAlmostEqual(report.turn_cost(model, speed="priority"),
                                    2 * report.turn_cost(model, speed="default"))
             self.assertAlmostEqual(report.turn_cost(model, speed="fast"),
                                    2 * report.turn_cost(model, speed="default"))
+
+    def test_sol61_attempt_is_counted_without_reusing_sol6_prices(self):
+        result = report.measured_usage([{"attempts": [{
+            "model": j.SOL, "speed": "default",
+            "usage": {"input_tokens": 1000, "cached_input_tokens": 500, "output_tokens": 10},
+        }]}])
+        self.assertEqual(result["native_attempts"], 1)
+        self.assertEqual(result["unknown_attempts"], 1)
+        self.assertEqual(result["priced_attempts"], 0)
+        self.assertIsNone(report.turn_cost(j.SOL))
 
     def test_prompt_cache_is_measured_per_session_and_model(self):
         entries = [

@@ -246,6 +246,12 @@ def _private_state_dir(path: Path, create: bool = False):
         raise RuntimeError("could not protect router state directory ACL: " + detail)
 
 
+def service_files(plan: dict) -> dict[str, bytes]:
+    # Match write_text newline translation on the target host.
+    return {path: text.replace("\n", os.linesep).encode("utf-8") for path, text in (
+        (plan["wrapper_path"], _wrapper(plan)), (plan["definition_path"], _render(plan)))}
+
+
 def install_service(plan: dict, dry_run: bool = True) -> dict:
     status = service_status(plan)
     if status["installed"] and not status["owned"]:
@@ -263,8 +269,8 @@ def install_service(plan: dict, dry_run: bool = True) -> dict:
                 if not _owned_local_file(path, plan):
                     raise FileExistsError("refusing to overwrite foreign installer file: " + str(path))
         _private_state_dir(state_dir, create=True)
-        wrapper_path.write_text(_wrapper(plan), encoding="utf-8")
-        definition_path.write_text(_render(plan), encoding="utf-8")
+        for name, data in service_files(plan).items():
+            Path(name).write_bytes(data)
         subprocess.run(["schtasks", "/Create", "/TN", SERVICE_ID, "/XML",
                         plan["definition_path"], "/F"], check=True)
         if not _owned_xml(_query_xml().stdout, plan, _task_run_level()):
@@ -277,14 +283,15 @@ def remove_service(plan: dict, dry_run: bool = True) -> dict:
     status = service_status(plan)
     if status["installed"] and not status["owned"]:
         raise FileExistsError("foreign scheduled task " + SERVICE_ID)
-    if not dry_run and status["installed"]:
+    if not dry_run:
         for key in ("definition_path", "wrapper_path"):
             path = Path(plan[key])
             if (path.exists() or path.is_symlink()) and not _owned_local_file(path, plan):
                 raise FileExistsError("refusing to remove foreign installer file: " + str(path))
-        if status["active"]:
-            subprocess.run(["schtasks", "/End", "/TN", SERVICE_ID], check=True)
-        subprocess.run(["schtasks", "/Delete", "/TN", SERVICE_ID, "/F"], check=True)
+        if status["installed"]:
+            if status["active"]:
+                subprocess.run(["schtasks", "/End", "/TN", SERVICE_ID], check=True)
+            subprocess.run(["schtasks", "/Delete", "/TN", SERVICE_ID, "/F"], check=True)
         for key in ("definition_path", "wrapper_path"):
             Path(plan[key]).unlink(missing_ok=True)
     return {"action": "remove" if status["installed"] else "absent", "dry_run": dry_run, **status}

@@ -24,7 +24,7 @@ CONTROL = ROOT / "integrations/canvastty"
 sys.path.insert(0, str(CONTROL))
 from control import Bridge  # noqa: E402 - checks the real CanvasTTY process and token
 sys.path.insert(0, str(ROOT))
-from integrations.jev.routing import LUNA, LUNA_PREVIOUS, TERRA_PREVIOUS, ORCHESTRATOR  # noqa: E402
+from integrations.jev.routing import LUNA, ORCHESTRATOR  # noqa: E402
 from pi_worker import fingerprint, snapshot_baseline, write_json, process_start, now  # noqa: E402
 from native_fallback import start_native_worker, monitor_answer, cancel_native, view_for  # noqa: E402
 
@@ -175,7 +175,7 @@ def validate_task(value):
         raise ValueError("Invalid input token budget")
     budget["max_input_tokens"] = token_limit
     pin = value.get("requested_model")
-    if pin is not None and pin not in (LUNA, LUNA_PREVIOUS, TERRA_PREVIOUS, ORCHESTRATOR):
+    if pin is not None and pin not in (LUNA, ORCHESTRATOR):
         raise ValueError("Unsupported model pin")
     candidates = value.get("context_candidates", [])
     if not isinstance(candidates, list) or len(candidates) > 12 or any(

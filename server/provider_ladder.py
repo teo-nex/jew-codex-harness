@@ -20,7 +20,7 @@ except ImportError:  # launched as a script from server/
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-NATIVE_MODELS = ("gpt-6-luna", "gpt-5.6-terra", "gpt-6-sol", "gpt-6-astra")
+NATIVE_MODELS = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra")
 
 
 def validate_ordered_config(value):
@@ -54,7 +54,10 @@ def validate_ordered_config(value):
         if "model" in provider and (not isinstance(model, str) or not model.strip() or model != model.strip()):
             raise ValueError("Provider model must be an exact non-empty model ID")
         if "models" in provider:
-            if (not isinstance(models, dict) or set(models) != set(NATIVE_MODELS)
+            # Older protected configs include the retired Terra key. Accept
+            # that complete shape, but keep only the three active tiers.
+            if (not isinstance(models, dict) or set(models) not in
+                    (set(NATIVE_MODELS), {*NATIVE_MODELS, "gpt-5.6-terra"})
                     or any(not isinstance(m, str) or not m.strip() or m != m.strip() for m in models.values())):
                 raise ValueError("Provider models must map every Jev native model to an exact model ID")
         if model is None and models is None and transport != "native":
@@ -68,7 +71,7 @@ def validate_ordered_config(value):
             raise ValueError("connection_ids must be unique non-empty IDs for an OmniRoute provider")
         entry = {**provider, "transport": transport}
         if models is not None:
-            entry["models"] = dict(models)
+            entry["models"] = {tier: models[tier] for tier in NATIVE_MODELS}
         if "connection_ids" in provider:
             entry["connection_ids"] = list(accounts)
         result.append(entry)
@@ -122,10 +125,9 @@ def validate_config(value):
 def plus_model(tier, effort):
     if tier not in NATIVE_MODELS or effort not in EFFORTS:
         raise ValueError("Invalid Plus model or reasoning effort")
-    if tier == "gpt-6-astra":
-        return tier
-    family = "luna" if "luna" in tier else "terra" if "terra" in tier else "sol"
-    return f"codex/gpt-5.6-{family}-{effort}"
+    # Preserve the selected generation; effort travels in the payload. An
+    # unsupported exact model may fail over, but must never become a 5.6 alias.
+    return tier
 
 
 class Ladder:
