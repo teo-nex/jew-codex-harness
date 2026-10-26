@@ -398,7 +398,7 @@ try {
     if (-not (Test-Path $Python) -or $RecreateVenv) {
       $BootstrapPython = (& node src/python-bootstrap.mjs | Select-Object -Last 1)
       if ($LASTEXITCODE -ne 0 -or -not $BootstrapPython) {
-        throw "Python 3.10–3.14 or uv is required for the pinned LiteLLM gateway."
+        throw "Python 3.10-3.14 or uv is required for the pinned LiteLLM gateway."
       }
       & $BootstrapPython -m venv --clear .venv
       if ($LASTEXITCODE -ne 0) { throw "Python could not create the virtual environment." }

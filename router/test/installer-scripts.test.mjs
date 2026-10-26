@@ -22,6 +22,12 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // them honestly on a native Windows checkout that has no such runtime.
 const POSIX_SHELL_AVAILABLE = spawnSync("sh", ["-c", "exit 0"], { stdio: "ignore" }).status === 0;
 
+test("the legacy PowerShell installer declares any non-ASCII source encoding", () => {
+  const source = readFileSync(path.join(root, "install.ps1"), "utf8");
+  assert.ok(!/[^\x00-\x7f]/.test(source) || source.startsWith("\uFEFF"),
+    "Windows PowerShell 5.1 needs a UTF-8 BOM for non-ASCII source");
+});
+
 // Nothing on a non-Windows machine can execute PowerShell -- the parse test in
 // this file is skipped off Windows for exactly that reason -- so the Windows
 // assertions here read the shipped scripts as text instead. That still catches
