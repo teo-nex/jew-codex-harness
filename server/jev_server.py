@@ -7,13 +7,12 @@ and a thinking depth, applies the routing policy, then relays to the Codex
 Router's local caller edge (native session sharing enabled) — with no format
 conversion: Responses in, Responses out, SSE relayed verbatim.
 
-Routing policy: Jev independently classifies the mandatory-Astra policy, chooses
-one capability tier, one thinking depth and a bounded route lease in a single
-typed request. Luna 6 handles simple questions and small unambiguous edits;
-Terra 6.1 handles bounded tasks with clear inputs and checks. Sol is the
-default for complex or unclear work. Astra is restricted to 3D/spatial work, computer use and
-heavy development. Routine architecture questions and reviews do not force it.
-Every pair uses standard speed. Uncertain Luna/Terra choices promote to Sol/high.
+Routing policy: Sol 6.1 handles hard tasks; Terra 6.1 is the default for most
+ordinary implementation, tests, tools and writing; Luna 6 handles only tiny
+self-contained tasks. Astra is manual-only (or an explicit operator override).
+Jev chooses capability, reasoning depth and route lease independently. The
+legacy astra_policy category now raises hard work to Sol, never Astra.
+Every pair uses standard speed. Uncertainty requiring stronger capability promotes to Sol/high.
 There are no keyword overrides or production target proportions.
 Technical Jev failures remain fail-open to sol @medium and are logged separately.
 

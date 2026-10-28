@@ -20,10 +20,10 @@ from routing_policy import (
 class SplitPolicy(unittest.TestCase):
     def test_user_sol_cap_keeps_high_risk_work_on_sol(self):
         with mock.patch.dict(os.environ, {"JEV_DISABLE_AUTO_ASTRA": "1"}):
-            decision = decision_from_answers(self.answer(model=jev.ASTRA,
+            decision = decision_from_answers(self.answer(model=jev.SOL,
                 effort="xhigh", astra_required=True))
         self.assertEqual(decision["model"], jev.SOL)
-        self.assertEqual(decision["gate"], "policy_cap")
+        self.assertEqual(decision["gate"], "sol_hard")
 
     def test_the_repeated_contract_stays_compact_and_explicit(self):
         encoded = json.dumps(QUESTIONS, separators=(",", ":"))
@@ -31,8 +31,8 @@ class SplitPolicy(unittest.TestCase):
         self.assertNotIn('"luna":"luna"', encoded)
         self.assertIn("3D/spatial graphics", encoded)
         self.assertIn("computer use", encoded)
-        self.assertIn("heavy software development", encoded)
-        self.assertIn("wording alone does not require Astra", encoded)
+        self.assertIn("Default to Terra 6.1", encoded)
+        self.assertNotIn("astra", QUESTIONS["model"]["criteria"])
         self.assertIn("terra", encoded)
         self.assertEqual(jev.LUNA, "gpt-6-luna")
         self.assertEqual(set(jev.TIERS), {"gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"})
@@ -100,7 +100,7 @@ class SplitPolicy(unittest.TestCase):
         }
 
     def test_valid_independent_choices_are_combined_without_an_override(self):
-        for model in jev.TIERS:
+        for model in MODEL_IDS.values():
             for effort in jev.EFFORTS:
                 specialist = model == jev.ASTRA
                 result = decision_from_answers(self.answer(model, effort, astra_required=specialist))
@@ -111,15 +111,17 @@ class SplitPolicy(unittest.TestCase):
                 self.assertEqual(result["lease"], "one_call")
                 self.assertEqual(result["confidence"], 0.12)
                 self.assertEqual(result["chosen_probability"], 0.4)
-                self.assertEqual(result["gate"], "astra_policy" if specialist else "apply")
+                self.assertEqual(result["gate"], "sol_hard" if specialist else "apply")
 
-    def test_astra_model_choice_cannot_escape_the_specialist_gate(self):
+    def test_astra_is_manual_only_and_cannot_be_a_classifier_model_choice(self):
         for effort in jev.EFFORTS:
-            decision = decision_from_answers(self.answer(jev.ASTRA, effort))
-            self.assertEqual(decision["model"], jev.SOL)
-            self.assertEqual(decision["base_model"], jev.ASTRA)
-            self.assertEqual(decision["effort"], effort)
-            self.assertEqual(decision["gate"], "astra_scope")
+            answer = self.answer(jev.SOL, effort)
+            answer["model"] = {"choice": "astra", "confidence": 1.0}
+            with self.assertRaisesRegex(ValueError, "unknown model choice"):
+                decision_from_answers(answer)
+            with self.assertRaises(ValueError):
+                route_choice(jev.ASTRA, effort)
+            self.assertEqual(jev.route(jev.ASTRA, effort)[0], jev.ASTRA)
 
     def test_terra61_is_exact_and_uncertain_choices_still_hold_on_sol(self):
         answer = self.answer(jev.TERRA, "medium")
@@ -131,6 +133,21 @@ class SplitPolicy(unittest.TestCase):
         with self.assertRaises(ValueError):
             route_choice("gpt-5.6-terra", "medium")
 
+    def test_terra_luna_ambiguity_does_not_pay_for_sol(self):
+        answer = self.answer(jev.TERRA, "medium")
+        answer["model"].update(confidence=0.76,
+            probabilities={"luna": 0.16, "terra": 0.84, "sol": 0.0})
+        decision = decision_from_answers(answer)
+        self.assertEqual((decision["model"], decision["effort"], decision["gate"]),
+                         (jev.TERRA, "medium", "apply"))
+        answer["model"]["probabilities"] = {"luna": 0.0, "terra": 0.74, "sol": 0.26}
+        decision = decision_from_answers(answer)
+        self.assertEqual((decision["model"], decision["effort"], decision["gate"]),
+                         (jev.SOL, "high", "confidence_hold"))
+        answer["model"]["probabilities"] = {"luna": 0.16, "terra": 0.84, "sol": 0.0}
+        answer["astra_policy"]["confidence"] = 0.8
+        self.assertEqual(decision_from_answers(answer)["model"], jev.SOL)
+
     def test_retired_sol6_cannot_be_selected_or_reused_as_a_route(self):
         self.assertEqual(jev.SOL, "gpt-6.1-sol")
         for effort in jev.EFFORTS:
@@ -140,15 +157,15 @@ class SplitPolicy(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     jev.route("gpt-6-sol", effort)
 
-    def test_mandatory_categories_override_the_base_model_with_astra(self):
+    def test_hard_categories_use_sol_and_never_astra(self):
         result = decision_from_answers(
             self.answer(jev.LUNA, "high", astra_required=True)
         )
-        self.assertEqual(result["model"], jev.ASTRA)
+        self.assertEqual(result["model"], jev.SOL)
         self.assertEqual(result["base_model"], jev.LUNA)
         self.assertEqual(result["astra_policy"], "astra")
         self.assertEqual(result["effort"], "high")
-        self.assertEqual(result["gate"], "astra_policy")
+        self.assertEqual(result["gate"], "sol_hard")
 
     def test_invalid_choices_cannot_become_an_unrequested_pair(self):
         invalid = (

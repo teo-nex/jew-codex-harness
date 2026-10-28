@@ -18,18 +18,26 @@ desktop or terminal UI acceptance.
 
 ## Configuration
 
-Automatic capability routing has four tiers: `gpt-6-luna` for a simple stable
-question or small unambiguous edit, `gpt-6.1-terra` for bounded worker tasks
-with clear inputs and checks (localized fixes, tests, extraction and writing),
-`gpt-6.1-sol` for complex or unclear ordinary work, and
-`gpt-6-astra` only for 3D/spatial work, computer use or heavy software
-development. Ordinary architecture questions, security reviews and final code
-reviews do not by themselves require Astra. A model-only Astra answer outside
-that scope is constrained to Sol. Uncertain Luna or Terra decisions promote to
-Sol/high; effort otherwise remains an independent Jev choice on each decision.
-Classifier failures, routing-off/shadow baselines and native-only project
-transport default to Sol. An operator's explicit `require_astra_final` policy
-and manual model choices remain overrides, not automatic classifications.
+Automatic capability routing has three tiers, in descending capability order:
+
+- `gpt-6.1-sol` for hard tasks: difficult debugging, ambiguous goals, open-ended
+  design, complex integration and consequential reviews.
+- `gpt-6.1-terra` is the default for most ordinary work: implementation across
+  functions/files, tests, routine debugging, refactoring, tools and writing.
+- `gpt-6-luna` only for tiny tasks: a stable question or a small self-contained
+  function/edit with explicit checks and no design choice.
+
+File count or review wording alone does not require Sol. Reasoning depth remains
+an independent choice. Uncertain Luna decisions promote to Sol/high. For Terra,
+a validated distribution with at most 10% Sol probability can retain Terra even
+when the uncertainty is between Terra and Luna; otherwise uncertain capability
+or hard-task classification promotes to Sol/high.
+Astra is excluded from the automatic model choices and remains available only
+through manual selection or an explicitly configured operator override such as
+`require_astra_final`. The legacy decision field `astra_policy` is retained for
+log/project compatibility: its `astra` category now selects Sol (`sol_hard`),
+never Astra. Classifier failures, routing-off/shadow baselines and native-only
+project transport retain their safe Sol defaults.
 Sol always means `gpt-6.1-sol` in automatic routing; `gpt-6-sol` is retired.
 Terra always means `gpt-6.1-terra`; `gpt-5.6-terra` remains historical only.
 Automatic routing keeps the shared `low`/`medium`/`high`/`xhigh`/`max` ladder.

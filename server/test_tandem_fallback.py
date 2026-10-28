@@ -40,7 +40,7 @@ MISMATCHED = (
 
 
 def jev_answer(tier, depth, confidence, lease="one_call"):
-    pair = route_choice(tier, depth, astra_required=tier == jev.ASTRA, lease=lease)
+    pair = route_choice(jev.SOL if tier == jev.ASTRA else tier, depth, astra_required=tier == jev.ASTRA, lease=lease)
     return {"answers": {
         "astra_policy": {"choice": pair["astra_policy"], "confidence": confidence},
         "model": {"choice": pair["model"], "confidence": confidence},
@@ -137,7 +137,7 @@ class TandemHandoff(unittest.TestCase):
         jev.caller_secret = lambda: "test-caller-secret"
         jev.load_key = lambda: "fixture-key"
         self.enterContext(mock.patch.object(jev, "call_jev_routed",
-            return_value=jev_answer(jev.ASTRA, "medium", 0.95)))
+            return_value=jev_answer(jev.SOL, "medium", 0.95)))
         jev.native_dry = lambda: "manual"
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), jev.Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
@@ -229,7 +229,7 @@ class TandemHandoff(unittest.TestCase):
         self.assertEqual(Edge.attempts, [])
 
     def test_a_refused_tandem_call_is_retried_on_the_sibling(self):
-        Edge.refuse = (jev.GO_FRONTIER,)
+        Edge.refuse = (jev.GO_STANDARD,)
         canonical = [
             {"type": "message", "role": "user", "content": "Original evidence."},
             {"type": "function_call", "call_id": "xmesh", "name": "xmesh_inspect",
@@ -241,7 +241,7 @@ class TandemHandoff(unittest.TestCase):
         self.assertEqual(status, 200, body)
         self.assertEqual(
             [model for model, _effort in Edge.attempts],
-            [jev.GO_FRONTIER, jev.GO_STANDARD],
+            [jev.GO_STANDARD, jev.GO_FRONTIER],
         )
         self.assertEqual([payload["input"] for payload in Edge.payloads],
                          [canonical, canonical])
@@ -252,7 +252,7 @@ class TandemHandoff(unittest.TestCase):
                          ["default", "default"])
 
     def test_nonquota_service_failure_is_held_before_retry(self):
-        Edge.refuse = (jev.GO_FRONTIER,)
+        Edge.refuse = (jev.GO_STANDARD,)
         Edge.refuse_status = 503
         for stream in (False, True):
             with self.subTest(stream=stream):
@@ -262,19 +262,19 @@ class TandemHandoff(unittest.TestCase):
                 self.assertIn(b"completed", body)
 
     def test_payment_required_is_retried_on_the_distinct_sibling(self):
-        Edge.refuse = (jev.GO_FRONTIER,)
+        Edge.refuse = (jev.GO_STANDARD,)
         Edge.refuse_status = 402
         status, body = self.call()
         self.assertEqual(status, 200, body)
         self.assertEqual(
             [model for model, _effort in Edge.attempts],
-            [jev.GO_FRONTIER, jev.GO_STANDARD],
+            [jev.GO_STANDARD, jev.GO_FRONTIER],
         )
 
     def test_single_fallback_does_not_retry_itself(self):
-        Edge.refuse = (jev.GO_FRONTIER,)
+        Edge.refuse = (jev.GO_STANDARD,)
         Edge.refuse_status = 503
-        with mock.patch.object(jev, "GO_TANDEM", (jev.GO_FRONTIER,)):
+        with mock.patch.object(jev, "GO_TANDEM", (jev.GO_STANDARD,)):
             status, _ = self.call()
         self.assertEqual(status, 503)
         self.assertEqual(len(Edge.attempts), 1)
@@ -307,7 +307,7 @@ class TandemHandoff(unittest.TestCase):
         self.assertIn("terminal event", json.loads(body)["error"]["message"])
         self.assertEqual(
             [model for model, _effort in Edge.attempts],
-            [jev.GO_FRONTIER, jev.GO_STANDARD],
+            [jev.GO_STANDARD, jev.GO_FRONTIER],
             "a lifecycle-only disconnect remains safe to retry",
         )
         with open(jev.LOG_PATH) as handle:
@@ -340,7 +340,7 @@ class TandemHandoff(unittest.TestCase):
         self.assertEqual(events[-1]["response"]["error"]["code"], "server_error")
         self.assertEqual(
             [model for model, _effort in Edge.attempts],
-            [jev.GO_FRONTIER],
+            [jev.GO_STANDARD],
             "visible partial output must never be replayed on the sibling",
         )
         with open(jev.LOG_PATH) as handle:
@@ -373,7 +373,7 @@ class TandemHandoff(unittest.TestCase):
                                          (jev.SOL, "medium", "priority"),
                                          (jev.LUNA, "medium", "fast"),
                                          (jev.SOL, "high", "priority"),
-                                         (jev.ASTRA, "xhigh", "fast")):
+                                         (jev.TERRA, "xhigh", "fast")):
             with self.subTest(tier=tier, depth=depth), mock.patch.object(
                 jev, "call_jev_routed", return_value=jev_answer(tier, depth, 0.95)
             ):
@@ -422,12 +422,12 @@ class TandemHandoff(unittest.TestCase):
         with mock.patch.object(
             jev,
             "call_jev_routed",
-            return_value=jev_answer(jev.ASTRA, "low", 0.2),
+            return_value=jev_answer(jev.SOL, "low", 0.2),
         ) as judge:
             status, body = self.call(input="You are creating a lossy continuation checkpoint")
         self.assertEqual(status, 200, body)
         judge.assert_called_once()
-        self.assertEqual(Edge.attempts[-1], (jev.ASTRA, "low"))
+        self.assertEqual(Edge.attempts[-1], (jev.SOL, "low"))
 
     def test_usage_is_logged_for_streaming_and_nonstreaming_calls(self):
         Edge.body = (
@@ -459,7 +459,7 @@ class TandemHandoff(unittest.TestCase):
                     self.assertEqual(attempt["usage"]["reasoning_tokens"], 15)
 
     def test_both_models_refusing_still_answers_the_caller(self):
-        Edge.refuse = (jev.GO_FRONTIER, jev.GO_STANDARD)
+        Edge.refuse = (jev.GO_STANDARD, jev.GO_FRONTIER)
         status, body = self.call()
         self.assertEqual(status, 429)
         self.assertIn(b"rate limit", body)
@@ -476,7 +476,7 @@ class TandemHandoff(unittest.TestCase):
             {"type": "response.completed",
              "response": {"id": "r", "status": "completed", "output": [item]}},
         ])
-        header = jev.answer_signature({"model": jev.GO_FRONTIER, "effort": "high"})
+        header = jev.answer_signature({"model": jev.GO_STANDARD, "effort": "high"})
         for stream in (True, False):
             status, body = self.call(stream=stream, input=[
                 {"role": "assistant", "content": header + "Previous reply"},
@@ -541,7 +541,7 @@ class TandemHandoff(unittest.TestCase):
             try:
                 status, body = self.call()
                 self.assertEqual(status, 200, body)
-                self.assertEqual([model for model, _ in Edge.attempts], [jev.ASTRA])
+                self.assertEqual([model for model, _ in Edge.attempts], [jev.SOL])
                 self.assertFalse(os.path.exists(state), "the stale flip must be dropped")
             finally:
                 jev.native_dry, jev.DRY_STATE_PATH, jev.DRY_MANUAL_PATH = saved
@@ -559,20 +559,22 @@ class TandemHandoff(unittest.TestCase):
             jev.DRY_STATE_PATH = state
             jev.DRY_MANUAL_PATH = os.path.join(tmp, "flag")
             try:
-                Edge.refuse = (jev.ASTRA,)
+                Edge.refuse = (jev.SOL,)
                 Edge.reset_at = time.time() + 1800
                 status, body = self.call(reasoning={"effort": "max"})
                 self.assertEqual(status, 200, body)
-                self.assertEqual([model for model, _ in Edge.attempts], [jev.ASTRA, jev.GO_FRONTIER])
+                self.assertEqual([model for model, _ in Edge.attempts], [jev.SOL, jev.GO_STANDARD])
                 self.assertNotIn("x-codex-router-exact-route", {
                     key.lower(): value for key, value in Edge.headers[0].items()
                 })
                 self.assertEqual({
                     key.lower(): value for key, value in Edge.headers[1].items()
                 }.get("x-codex-router-exact-route"), "1")
-                self.assertEqual(
-                    Edge.payloads[0]["input"][0].get("type"), "configuration_update"
-                )
+                self.assertFalse(any(
+                    item.get("type") == "configuration_update"
+                    for item in Edge.payloads[0]["input"]
+                    if isinstance(item, dict)
+                ))
                 self.assertFalse(any(
                     item.get("type") == "configuration_update"
                     for item in Edge.payloads[1]["input"]

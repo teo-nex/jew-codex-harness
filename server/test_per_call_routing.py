@@ -34,7 +34,7 @@ COMPLETED = (
 
 
 def answer(tier, depth, astra_required=False, lease="one_call"):
-    pair = route_choice(tier, depth, astra_required, lease)
+    pair = route_choice(jev.SOL if tier == jev.ASTRA else tier, depth, astra_required, lease)
     return {
         "model": "jev-test",
         "answers": {
@@ -250,7 +250,7 @@ class PerCallEndToEnd(unittest.TestCase):
         self.assertEqual(judge.call_count, 4)
         self.assertEqual(
             [p["model"] for p in Edge.payloads],
-            [jev.LUNA, jev.SOL, jev.TERRA, jev.ASTRA],
+            [jev.LUNA, jev.SOL, jev.TERRA, jev.SOL],
         )
         self.assertEqual([r["routing_scope"] for r in self.records], ["one_call"] * 4)
         self.assertEqual(len({r["cache_scope"] for r in self.records}), 1)
@@ -374,21 +374,16 @@ class PerCallEndToEnd(unittest.TestCase):
             [record["decision_source"] for record in self.records], ["jev", "jev"]
         )
 
-    def test_astra_effort_uses_configuration_update_without_rewriting_base_effort(self):
+    def test_manual_astra_effort_keeps_configuration_update_support(self):
         history = [message("user", "perform the final security review")]
-        sent = payload_for(history, reasoning={"effort": "low"})
-        with mock.patch.object(
-            jev, "call_jev_routed",
-            return_value=answer(jev.ASTRA, "high", astra_required=True),
-        ):
-            self.call(sent)
-        forwarded = Edge.payloads[-1]
+        forwarded = payload_for(list(history), reasoning={"effort": "low"})
+        update, transport = jev.apply_route_payload(
+            forwarded, jev.ASTRA, "high", {"effort": "low"})
+        self.assertEqual(forwarded["model"], jev.ASTRA)
         self.assertEqual(forwarded["reasoning"]["effort"], "low")
-        self.assertEqual(forwarded["input"][0], {
-            "type": "configuration_update", "reasoning": {"effort": "high"},
-        })
+        self.assertEqual(update, {"type": "configuration_update", "reasoning": {"effort": "high"}})
         self.assertEqual(forwarded["input"][1:], history)
-        self.assertEqual(self.records[-1]["effort_transport"], "configuration_update")
+        self.assertEqual(transport, "configuration_update")
 
     def test_next_decision_sees_successful_models_as_cache_affinity(self):
         opening = [message("user", "implement the bounded change")]
@@ -405,7 +400,7 @@ class PerCallEndToEnd(unittest.TestCase):
         self.assertEqual(second_state["cache_state"]["models"]["sol"]["read_pct"], 80.0)
         self.assertEqual(self.records[1]["cache_state"]["last_model"], "sol")
 
-    def test_specialist_policy_forces_astra_without_changing_replay(self):
+    def test_hard_policy_uses_sol_without_changing_replay(self):
         history = [message("user", "Build the interactive 3D scene and inspect it on the desktop.")]
         sent = payload_for(history)
         with mock.patch.object(
@@ -414,9 +409,9 @@ class PerCallEndToEnd(unittest.TestCase):
             return_value=answer(jev.SOL, "high", astra_required=True),
         ):
             self.call(sent)
-        self.assertEqual(Edge.payloads[-1]["model"], jev.ASTRA)
+        self.assertEqual(Edge.payloads[-1]["model"], jev.SOL)
         self.assertEqual(Edge.payloads[-1]["input"], history)
-        self.assertEqual(self.records[-1]["gate"], "astra_policy")
+        self.assertEqual(self.records[-1]["gate"], "sol_hard")
         self.assertEqual(self.records[-1]["base_tier"], jev.SOL)
 
     def test_ordinary_review_then_heavy_development_then_fix_routes_each_phase(self):
@@ -438,10 +433,10 @@ class PerCallEndToEnd(unittest.TestCase):
                 self.assertEqual(Edge.payloads[-1]["input"], history)
         self.assertEqual(judge.call_count, 3)
         self.assertEqual(
-            [p["model"] for p in Edge.payloads], [jev.SOL, jev.ASTRA, jev.SOL]
+            [p["model"] for p in Edge.payloads], [jev.SOL, jev.SOL, jev.SOL]
         )
         self.assertEqual(
-            [r["gate"] for r in self.records], ["apply", "astra_policy", "apply"]
+            [r["gate"] for r in self.records], ["apply", "sol_hard", "apply"]
         )
         self.assertEqual([p["reasoning"]["effort"] for p in Edge.payloads],
                          ["medium", "xhigh", "high"])

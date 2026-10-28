@@ -1,43 +1,38 @@
 """Compact Jev contract: model, effort, lease and mandatory-frontier policy."""
 import math
-import os
 
-POLICY_VERSION = "split-v15-luna6-terra6.1-sol6.1-astra-specialist"
+POLICY_VERSION = "split-v16-terra6.1-default-sol6.1-hard"
 LUNA, TERRA, SOL, ASTRA = "gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"
 TIERS = (LUNA, TERRA, SOL, ASTRA)
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LEASES = ("one_call", "tool_chain", "user_turn")
 
-MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL, "astra": ASTRA}
+MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL}
+# Keep the legacy category name for decision-log/project-policy compatibility.
+# It now identifies hard work for Sol, never an automatic Astra request.
 ASTRA_POLICY = {
     "astra": (
-        "Remaining work is 3D/spatial graphics, computer use or visual desktop interaction, "
-        "or heavy software development: substantial system construction/redesign or "
-        "exceptionally difficult multi-component implementation/debugging. "
-        "Use only while this specialist/heavy phase remains."
+        "Hard work needing Sol 6.1: open-ended architecture, difficult debugging, "
+        "complex integration, 3D/spatial graphics, computer use or consequential review."
     ),
     "normal": (
-        "Everything else: ordinary development, tools, tests, debugging, architecture questions, "
-        "code/security/final review, administration and reporting. "
-        "Review, risk or architecture wording alone does not require Astra."
+        "Ordinary implementation, tools, tests, routine debugging, refactoring, "
+        "writing and administration. Review, risk or architecture wording alone "
+        "does not prove difficulty."
     ),
 }
 MODEL_PROFILES = {
     "luna": (
-        "Luna 6 only: one simple stable question, or a small unambiguous localized edit "
-        "with no design choice. Short alone does not prove simplicity."
+        "Only tiny tasks: one stable question or one small self-contained function/edit "
+        "with explicit checks and no design choice. Short alone does not prove simplicity."
     ),
     "terra": (
-        "Bounded worker tasks with clear inputs and checks: localized code fixes, "
-        "tests, extraction and concise writing. No broad design or uncertain scope."
+        "Default for most work: ordinary implementation across functions/files, tests, "
+        "routine debugging, refactoring, tools, extraction and writing using known patterns."
     ),
     "sol": (
-        "Default for complex or unclear ordinary work: cross-file implementation, "
-        "debugging, refactoring and reviews. Use when Luna or Terra is insufficient."
-    ),
-    "astra": (
-        "Only 3D/spatial graphics, computer use/visual desktop interaction or heavy "
-        "software development as defined by astra_policy. Not ordinary reviews or planning."
+        "Hard tasks: difficult debugging, open-ended design, ambiguous goals, complex "
+        "integration or consequential review. File count alone does not require Sol."
     ),
 }
 DEPTH_PROFILES = {
@@ -78,7 +73,7 @@ QUESTIONS = {
         "instructions": (
             "Minimize total task cost including corrections and clarification turns. "
             "Choose sufficient capability for remaining work. "
-            "Use Luna for simple work, Terra for bounded work, Sol otherwise; Astra only for specialist/heavy work. "
+            "Default to Terra 6.1; use Sol 6.1 for hard work, Luna only for tiny tasks. "
             "Use cache_state model state, read_pct, age_s and context_k as reprocessing-cost "
             "evidence. Keep a sufficient last model, especially with large context; switch "
             "when capability demands it. hot means a real read; warming only recent success. "
@@ -160,7 +155,7 @@ def _validated_choice(answers, name, choices):
 
 
 def decision_from_answers(answers):
-    """Validate Jev's decisions and enforce mandatory Astra categories."""
+    """Validate the three-tier automatic hierarchy; Astra stays manual-only."""
     astra_policy, astra_probs, astra_conf = _validated_choice(
         answers, "astra_policy", ASTRA_POLICY
     )
@@ -187,17 +182,15 @@ def decision_from_answers(answers):
         )
         if probabilities is not None
     ]
-    selected_model = ASTRA if astra_policy == "astra" else MODEL_IDS[model_choice]
-    gate = "astra_policy" if astra_policy == "astra" else "apply"
-    if astra_policy == "normal" and selected_model == ASTRA:
-        selected_model, gate = SOL, "astra_scope"
-    policy_cap = os.environ.get("JEV_DISABLE_AUTO_ASTRA") == "1"
-    if policy_cap and selected_model == ASTRA:
-        selected_model = SOL
-        gate = "policy_cap"
-        if EFFORTS.index(effort) < EFFORTS.index("xhigh"):
-            effort = "xhigh"
-    elif selected_model in (LUNA, TERRA) and (model_conf is None or model_conf < 0.90 or
+    selected_model = SOL if astra_policy == "astra" else MODEL_IDS[model_choice]
+    gate = "sol_hard" if astra_policy == "astra" else "apply"
+    # Ambiguity between Terra and the cheaper Luna does not require Sol.
+    # Keep the conservative confidence gate when a stronger tier is plausible
+    # or the classifier omits a validated probability distribution.
+    model_uncertain = model_conf is None or model_conf < 0.90
+    if model_uncertain and selected_model == TERRA and model_probs is not None:
+        model_uncertain = model_probs["sol"] > 0.10
+    if selected_model in (LUNA, TERRA) and (model_uncertain or
                                      astra_conf is None or astra_conf < 0.90):
         selected_model = SOL
         gate = "confidence_hold"
