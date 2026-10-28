@@ -33,9 +33,9 @@ class SplitPolicy(unittest.TestCase):
         self.assertIn("computer use", encoded)
         self.assertIn("heavy software development", encoded)
         self.assertIn("wording alone does not require Astra", encoded)
-        self.assertNotIn("terra", encoded)
+        self.assertIn("terra", encoded)
         self.assertEqual(jev.LUNA, "gpt-6-luna")
-        self.assertEqual(set(jev.TIERS), {"gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"})
+        self.assertEqual(set(jev.TIERS), {"gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"})
         self.assertEqual(set(QUESTIONS), {"astra_policy", "model", "effort", "lease"})
         self.assertIn("corrections and clarification turns", encoded)
         self.assertIn("reprocessing-cost evidence", encoded)
@@ -121,11 +121,13 @@ class SplitPolicy(unittest.TestCase):
             self.assertEqual(decision["effort"], effort)
             self.assertEqual(decision["gate"], "astra_scope")
 
-    def test_retired_terra_choice_is_rejected(self):
-        answer = self.answer()
-        answer["model"] = {"choice": "terra", "confidence": 1.0}
-        with self.assertRaisesRegex(ValueError, "unknown model choice"):
-            decision_from_answers(answer)
+    def test_terra61_is_exact_and_uncertain_choices_still_hold_on_sol(self):
+        answer = self.answer(jev.TERRA, "medium")
+        self.assertEqual(decision_from_answers(answer)["model"], "gpt-6.1-terra")
+        answer["model"]["confidence"] = 0.89
+        decision = decision_from_answers(answer)
+        self.assertEqual((decision["model"], decision["effort"], decision["gate"]),
+                         (jev.SOL, "high", "confidence_hold"))
         with self.assertRaises(ValueError):
             route_choice("gpt-5.6-terra", "medium")
 

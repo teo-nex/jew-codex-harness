@@ -32,6 +32,16 @@ verify_worker = load_module("verify_worker")
 
 
 class PortableReportPathTests(unittest.TestCase):
+    def test_terra61_uses_its_own_api_card_and_long_context_multiplier(self):
+        api_cost = load_module("report_api_cost")
+        rate = api_cost.rate_for("native/gpt-6.1-terra-medium", None, {})
+        short = api_cost.price_attempt({"input_tokens": 1000, "cached_input_tokens": 500,
+                                       "output_tokens": 10}, rate)
+        self.assertEqual(str(short["low"]), "0.000575")
+        long = api_cost.price_attempt({"input_tokens": 300000, "cached_input_tokens": 0,
+                                      "output_tokens": 1000}, rate)
+        self.assertEqual(str(long["low"]), "0.6075")
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

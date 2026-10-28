@@ -20,7 +20,8 @@ except ImportError:  # launched as a script from server/
 
 STAGES = ("plus", "gemini", "opus", "glm", "deepseek", "wally", "main", "exhausted")
 EFFORTS = ("low", "medium", "high", "xhigh", "max")
-NATIVE_MODELS = ("gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra")
+NATIVE_MODELS = ("gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra")
+LEGACY_NATIVE_MODELS = set(NATIVE_MODELS) - {"gpt-6.1-terra"}
 
 
 def validate_ordered_config(value):
@@ -54,10 +55,9 @@ def validate_ordered_config(value):
         if "model" in provider and (not isinstance(model, str) or not model.strip() or model != model.strip()):
             raise ValueError("Provider model must be an exact non-empty model ID")
         if "models" in provider:
-            # Older protected configs include the retired Terra key. Accept
-            # that complete shape, but keep only the three active tiers.
-            if (not isinstance(models, dict) or set(models) not in
-                    (set(NATIVE_MODELS), {*NATIVE_MODELS, "gpt-5.6-terra"})
+            # Preserve complete pre-Terra mappings without inventing a destination.
+            if (not isinstance(models, dict) or (set(models) - {"gpt-5.6-terra"}) not in
+                    (set(NATIVE_MODELS), LEGACY_NATIVE_MODELS)
                     or any(not isinstance(m, str) or not m.strip() or m != m.strip() for m in models.values())):
                 raise ValueError("Provider models must map every Jev native model to an exact model ID")
         if model is None and models is None and transport != "native":
@@ -71,7 +71,7 @@ def validate_ordered_config(value):
             raise ValueError("connection_ids must be unique non-empty IDs for an OmniRoute provider")
         entry = {**provider, "transport": transport}
         if models is not None:
-            entry["models"] = {tier: models[tier] for tier in NATIVE_MODELS}
+            entry["models"] = {tier: models[tier] for tier in NATIVE_MODELS if tier in models}
         if "connection_ids" in provider:
             entry["connection_ids"] = list(accounts)
         result.append(entry)
@@ -168,7 +168,7 @@ class Ladder:
             raise ValueError("stable thread scope required")
         if self.providers is not None:
             return self._ordered_route(scope, tier, effort, recover_primary)
-        if tier == "gpt-6-astra":
+        if tier in ("gpt-6-astra", "gpt-6.1-terra"):
             return self.native_route(tier, effort)
         def operation(state):
             thread = state.setdefault(scope, {"stage": "plus", "gemini_index": 0})
@@ -297,15 +297,19 @@ class Ladder:
 
     def native_route(self, tier, effort, *, excluded=()):
         if self.providers is None:
-            choice = {"stage": "main", "model": tier if tier == "gpt-6-astra" else self.config["main_model"], "account": None,
+            choice = {"stage": "main", "model": tier if tier in ("gpt-6-astra", "gpt-6.1-terra") else self.config["main_model"], "account": None,
                       "effort": effort, "transport": "native"}
             return None if (choice["model"], choice["account"]) in excluded else choice
         for index, provider in enumerate(self.providers):
-            if provider["transport"] == "native":
+            if provider["transport"] == "native" and self._supports_tier(provider, tier):
                 choice = self._ordered_choice(index, 0, tier, effort)
                 if (choice["model"], choice["account"]) not in excluded:
                     return choice
         return None
+
+    @staticmethod
+    def _supports_tier(provider, tier):
+        return "models" not in provider or tier in provider["models"]
 
     def _ordered_choice(self, index, account_index, tier, effort):
         if index >= len(self.providers):
@@ -354,9 +358,19 @@ class Ladder:
         return max((entries.get(self._cooldown_key(route, reason), {}).get("until", 0)
                     for reason in (None, "model_unavailable")), default=0)
 
+    def _ordered_scope(self, scope, tier):
+        # A configuration gap is tier-specific, not a failure of the provider.
+        # Keep that tier's cursor separate so skipping a pre-Terra mapping
+        # cannot strand Sol/Luna on its fallback. Cooldowns remain shared.
+        if any(not self._supports_tier(provider, tier) for provider in self.providers):
+            identity = json.dumps([scope, tier], ensure_ascii=True).encode()
+            return "_tier_scope:" + hashlib.sha256(identity).hexdigest()
+        return scope
+
     def _ordered_route(self, scope, tier, effort, recover_primary):
         if tier not in NATIVE_MODELS or effort not in EFFORTS:
             raise ValueError("Invalid Jev model or reasoning effort")
+        scope = self._ordered_scope(scope, tier)
         def operation(state):
             thread = state.get(scope)
             if not isinstance(thread, dict) or thread.get("config_hash") != self.fingerprint:
@@ -391,6 +405,8 @@ class Ladder:
                 # Retry any recovered route after complete exhaustion, not only
                 # the first provider (which may have a much longer auth cooldown).
                 for candidate_index, provider in enumerate(self.providers):
+                    if not self._supports_tier(provider, tier):
+                        continue
                     for candidate_account in range(max(1, len(provider.get("connection_ids", [])))):
                         candidate = self._ordered_choice(candidate_index, candidate_account, tier, effort)
                         if self._slot_until(entries, candidate) <= now:
@@ -399,6 +415,9 @@ class Ladder:
                     if index < len(self.providers):
                         break
             while index < len(self.providers):
+                if not self._supports_tier(self.providers[index], tier):
+                    index, account = index + 1, 0
+                    continue
                 candidate = self._ordered_choice(index, account, tier, effort)
                 if self._slot_until(entries, candidate) <= now:
                     break
@@ -414,6 +433,7 @@ class Ladder:
         return self._with_state(operation)
 
     def _ordered_advance(self, scope, route, reason, reset_at, cooldown_seconds):
+        scope = self._ordered_scope(scope, route.get("selected_tier"))
         def operation(state):
             thread = state.get(scope)
             if (not isinstance(thread, dict) or route.get("config_hash") != self.fingerprint
@@ -454,6 +474,7 @@ class Ladder:
         return self._with_state(operation)
 
     def _ordered_success(self, scope, route):
+        scope = self._ordered_scope(scope, route.get("selected_tier"))
         def operation(state):
             thread = state.get(scope)
             if (not isinstance(thread, dict) or route.get("config_hash") != self.fingerprint

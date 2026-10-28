@@ -239,7 +239,7 @@ class PerCallEndToEnd(unittest.TestCase):
         choices = [
             answer(jev.LUNA, "low"),
             answer(jev.SOL, "high"),
-            answer(jev.SOL, "medium"),
+            answer(jev.TERRA, "medium"),
             answer(jev.ASTRA, "xhigh", astra_required=True),
         ]
         with mock.patch.object(jev, "call_jev_routed", side_effect=choices) as judge:
@@ -250,7 +250,7 @@ class PerCallEndToEnd(unittest.TestCase):
         self.assertEqual(judge.call_count, 4)
         self.assertEqual(
             [p["model"] for p in Edge.payloads],
-            [jev.LUNA, jev.SOL, jev.SOL, jev.ASTRA],
+            [jev.LUNA, jev.SOL, jev.TERRA, jev.ASTRA],
         )
         self.assertEqual([r["routing_scope"] for r in self.records], ["one_call"] * 4)
         self.assertEqual(len({r["cache_scope"] for r in self.records}), 1)

@@ -21,7 +21,7 @@ identifiers; they are labels, not predefined provider names. Each entry has:
 - `id`: your route label.
 - `transport`: `omniroute` (default) or `native` (the bundled Codex router).
 - `model`: one exact destination ID for every Jev decision; or `models`: a
-  complete mapping from `gpt-6-luna`, `gpt-6.1-sol` and
+  complete mapping from `gpt-6-luna`, `gpt-6.1-terra`, `gpt-6.1-sol` and
   `gpt-6-astra` to exact destination IDs. Do not supply both fields.
 - `connection_ids`: optional ordered list of 1-32 unique OmniRoute account IDs.
   Omitting it lets the existing gateway choose the connection. Native routes
@@ -38,12 +38,18 @@ the mapping. See [reasoning routing](REASONING.md). Unknown support is recorded
 as unknown, not inferred from a provider name. An empty profile object is valid.
 Mixed legacy/v2 fields, duplicate IDs, partial model mappings and invalid
 reasoning profiles are rejected before installation.
-Older complete mappings may retain a `gpt-5.6-terra` key for compatibility;
-validation ignores that retired entry. Terra is not an automatic routing tier.
+Older complete three-tier mappings remain valid without `gpt-6.1-terra`.
+When Terra is selected, entries without its mapping are skipped; no bare
+gateway ID or Sol destination is invented. Add an exact Terra destination or
+an unpinned native entry to make Terra routable through that configuration.
+Mappings may retain a `gpt-5.6-terra` key for compatibility;
+validation ignores that retired entry.
 Sol mapping keys must use `gpt-6.1-sol`; the retired `gpt-6-sol` key is rejected,
 so an old gateway destination is never silently reused for the new model.
 The legacy Plus adapter preserves the selected exact native model ID instead
 of rewriting Luna 6 or Sol 6.1 to an older model alias. Effort remains a payload field.
+Legacy ladders hand Terra 6.1 directly to the native transport, as they do Astra;
+version 2 is required to configure an explicit external Terra mapping.
 
 ## Fallback and recovery
 

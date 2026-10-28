@@ -2,6 +2,14 @@
 
 The default `jev-workers` backend uses the Codex CLI on macOS, Linux and
 Windows. CanvasTTY is not required for coding tasks.
+Workers keep `jev/auto`: Jev can select `gpt-6.1-terra` for bounded tasks with
+clear inputs and checks, while retaining Luna, Sol and Astra for their existing
+roles. Do not pin a model in a `jev-workers` submission to bypass its configured
+provider sequence. A fixed provider destination still overrides the native tier;
+Terra execution requires an unpinned native entry or an explicit Terra mapping.
+This routing support does not certify a reseller's Terra route as a native v2
+Codex child; that requires the separate five-check provider-specific proof.
+
 Inside a macOS CanvasTTY agent session, the existing native terminal backend
 remains the default: its outer isolation cannot launch a nested Seatbelt
 sandbox (`sandbox-exec: sandbox_apply: Operation not permitted`). No sandbox

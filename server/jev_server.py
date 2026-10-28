@@ -10,9 +10,10 @@ conversion: Responses in, Responses out, SSE relayed verbatim.
 Routing policy: Jev independently classifies the mandatory-Astra policy, chooses
 one capability tier, one thinking depth and a bounded route lease in a single
 typed request. Luna 6 handles simple questions and small unambiguous edits;
-Sol is the default. Astra is restricted to 3D/spatial work, computer use and
+Terra 6.1 handles bounded tasks with clear inputs and checks. Sol is the
+default for complex or unclear work. Astra is restricted to 3D/spatial work, computer use and
 heavy development. Routine architecture questions and reviews do not force it.
-Every pair uses standard speed. Uncertain Luna choices promote to Sol/high.
+Every pair uses standard speed. Uncertain Luna/Terra choices promote to Sol/high.
 There are no keyword overrides or production target proportions.
 Technical Jev failures remain fail-open to sol @medium and are logged separately.
 
@@ -96,7 +97,7 @@ from local_runtime import (
     private_regular, protect_logs,
 )
 
-from routing_policy import (ASTRA, EFFORTS, LUNA, POLICY_VERSION, QUESTIONS, SOL,
+from routing_policy import (ASTRA, EFFORTS, LUNA, TERRA, POLICY_VERSION, QUESTIONS, SOL,
                             TIERS, decision_from_answers, route)
 from provider_ladder import Ladder
 from project_policy import resolve as resolve_project_policy, restrict as restrict_project_routes, final_required
@@ -970,6 +971,7 @@ def _debug_shape(payload):
 
 ROUTE_GLYPHS = {
     "gpt-6-luna": ("luna", "⚡"),      # cheap tier, adaptive thinking
+    "gpt-6.1-terra": ("terra", "🌍"),  # bounded worker tasks
     "gpt-6.1-sol": ("sol", "🧠"),        # reasoning workhorse
     "gpt-6-astra": ("astra", "🚀"),      # frontier
     "wally/glm-5.3-flash": ("wally-glm", "✨"),

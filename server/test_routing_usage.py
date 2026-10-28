@@ -7,6 +7,17 @@ import report_routing as report
 
 
 class Usage(unittest.TestCase):
+    def test_terra61_is_native_without_borrowing_old_terra_credit_rates(self):
+        result = report.measured_usage([{"attempts": [{
+            "model": "gpt-6.1-terra", "speed": "default",
+            "usage": {"input_tokens": 1000, "cached_input_tokens": 500, "output_tokens": 10},
+        }]}])
+        self.assertEqual(result["native_attempts"], 1)
+        self.assertEqual(result["unknown_attempts"], 1)
+        self.assertEqual(result["priced_attempts"], 0)
+        self.assertAlmostEqual(report.turn_cost("gpt-6.1-terra",
+            {"input": 1000, "cached": 500, "output": 10}), 0.000575)
+
     def test_response_model_and_first_token_are_observed_not_guessed(self):
         marker = j.SummaryMarker("")
         self.assertIsNone(marker.response_model)

@@ -20,6 +20,41 @@ CONFIG = {"providers": [
 
 
 class OrderedLadderTests(unittest.TestCase):
+    def test_terra61_preserves_exact_native_and_gateway_identity(self):
+        ladder = Ladder({"providers": [{"id": "native", "transport": "native"}]}, self.path)
+        for effort in jev.EFFORTS:
+            self.assertEqual(ladder.route("terra", jev.TERRA, effort)["model"], "gpt-6.1-terra")
+            self.assertEqual(ladder.native_route(jev.TERRA, effort)["model"], "gpt-6.1-terra")
+            self.assertEqual(plus_model(jev.TERRA, effort), "gpt-6.1-terra")
+
+    def test_pre_terra_mapping_skips_unmapped_tier_without_inventing_alias(self):
+        models = {m: "gateway/" + m for m in NATIVE_MODELS if m != jev.TERRA}
+        config = {"providers": [{"id": "mapped", "models": models},
+                                {"id": "native", "transport": "native"}]}
+        ladder = Ladder(config, self.path)
+        self.assertNotIn(jev.TERRA, ladder.providers[0]["models"])
+        choice = ladder.route("terra", jev.TERRA, "medium")
+        self.assertEqual((choice["stage"], choice["model"]), ("native", "gpt-6.1-terra"))
+        self.assertEqual(ladder.route("terra", jev.SOL, "high", recover_primary=False)["model"],
+                         "gateway/" + jev.SOL)
+        ladder = Ladder({"providers": [config["providers"][0]]}, self.path)
+        self.assertEqual(ladder.route("no-guess", jev.TERRA, "medium")["stage"], "exhausted")
+        self.assertEqual(ladder.route("no-guess", jev.TERRA, "medium")["stage"], "exhausted")
+        self.assertEqual(ladder.route("no-guess", jev.SOL, "high", recover_primary=False)["model"],
+                         "gateway/" + jev.SOL)
+
+    def test_terra_mapping_skip_keeps_failure_receipts_and_cooldowns_valid(self):
+        models = {m: "gateway/" + m for m in NATIVE_MODELS if m != jev.TERRA}
+        config = {"providers": [{"id": "mapped", "models": models},
+                                {"id": "native", "transport": "native"}]}
+        ladder = Ladder(config, self.path)
+        terra = ladder.route("same", jev.TERRA, "medium")
+        self.assertTrue(ladder.advance("same", terra, "quota"))
+        self.assertFalse(ladder.advance("same", terra, "quota"))
+        self.assertEqual(ladder.route("same", jev.TERRA, "medium", recover_primary=False)["stage"],
+                         "exhausted")
+        self.assertEqual(ladder.route("same", jev.SOL, "medium", recover_primary=False)["stage"], "mapped")
+
     def setUp(self):
         temporary = tempfile.TemporaryDirectory()
         self.addCleanup(temporary.cleanup)

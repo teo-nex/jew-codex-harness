@@ -18,19 +18,26 @@ desktop or terminal UI acceptance.
 
 ## Configuration
 
-Automatic capability routing has three tiers: `gpt-6-luna` for a simple stable
-question or small unambiguous edit, `gpt-6.1-sol` for ordinary work, and
+Automatic capability routing has four tiers: `gpt-6-luna` for a simple stable
+question or small unambiguous edit, `gpt-6.1-terra` for bounded worker tasks
+with clear inputs and checks (localized fixes, tests, extraction and writing),
+`gpt-6.1-sol` for complex or unclear ordinary work, and
 `gpt-6-astra` only for 3D/spatial work, computer use or heavy software
 development. Ordinary architecture questions, security reviews and final code
 reviews do not by themselves require Astra. A model-only Astra answer outside
-that scope is constrained to Sol. Uncertain Luna decisions still promote to
+that scope is constrained to Sol. Uncertain Luna or Terra decisions promote to
 Sol/high; effort otherwise remains an independent Jev choice on each decision.
 Classifier failures, routing-off/shadow baselines and native-only project
 transport default to Sol. An operator's explicit `require_astra_final` policy
 and manual model choices remain overrides, not automatic classifications.
 Sol always means `gpt-6.1-sol` in automatic routing; `gpt-6-sol` is retired.
+Terra always means `gpt-6.1-terra`; `gpt-5.6-terra` remains historical only.
+Automatic routing keeps the shared `low`/`medium`/`high`/`xhigh`/`max` ladder.
+Terra's additional `none` setting is not an automatic routing choice.
 Historical cost reports retain their exact old model IDs and price cards;
 Sol 6.1 usage is counted as unpriced until its own rate card is verified.
+Terra 6.1 uses its [own API card](https://developers.openai.com/api/docs/models/gpt-6.1-terra)
+in API-equivalent reports; its ChatGPT credit usage remains unpriced.
 
 Route reuse requires a real `prompt_cache_key`, an unchanged user turn and
 request contract, and a clean tool continuation. A lease lasts at most five

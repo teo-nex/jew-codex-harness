@@ -71,6 +71,9 @@ class Rate:
 # Historical price cards and counterfactual baselines, not routing choices.
 # No Sol 6.1 price is inferred from Sol 6; new attempts remain unpriced.
 OPENAI = {
+    # Exact Terra 6.1 short-context API card, verified 2026-10-28:
+    # https://developers.openai.com/api/docs/models/gpt-6.1-terra
+    "gpt-6.1-terra": ("1.00", "0.05", "5.00", "1.25"),
     "gpt-6-luna": ("0.10", "0.01", "0.50", "0.125"),
     "gpt-6-sol": ("2.00", "0.20", "10.00", "2.50"),
     "gpt-6-astra": ("10.00", "1.00", "50.00", "12.50"),

@@ -2,13 +2,13 @@
 import math
 import os
 
-POLICY_VERSION = "split-v14-luna6-sol6.1-astra-specialist"
-LUNA, SOL, ASTRA = "gpt-6-luna", "gpt-6.1-sol", "gpt-6-astra"
-TIERS = (LUNA, SOL, ASTRA)
+POLICY_VERSION = "split-v15-luna6-terra6.1-sol6.1-astra-specialist"
+LUNA, TERRA, SOL, ASTRA = "gpt-6-luna", "gpt-6.1-terra", "gpt-6.1-sol", "gpt-6-astra"
+TIERS = (LUNA, TERRA, SOL, ASTRA)
 EFFORTS = ["low", "medium", "high", "xhigh", "max"]
 LEASES = ("one_call", "tool_chain", "user_turn")
 
-MODEL_IDS = {"luna": LUNA, "sol": SOL, "astra": ASTRA}
+MODEL_IDS = {"luna": LUNA, "terra": TERRA, "sol": SOL, "astra": ASTRA}
 ASTRA_POLICY = {
     "astra": (
         "Remaining work is 3D/spatial graphics, computer use or visual desktop interaction, "
@@ -27,10 +27,13 @@ MODEL_PROFILES = {
         "Luna 6 only: one simple stable question, or a small unambiguous localized edit "
         "with no design choice. Short alone does not prove simplicity."
     ),
+    "terra": (
+        "Bounded worker tasks with clear inputs and checks: localized code fixes, "
+        "tests, extraction and concise writing. No broad design or uncertain scope."
+    ),
     "sol": (
-        "Default for all other ordinary work: implementation across functions/files, tools, "
-        "tests, debugging, refactoring, reviews and unclear requirements. "
-        "Use unless the task is clearly Luna-simple or Astra-specialist/heavy."
+        "Default for complex or unclear ordinary work: cross-file implementation, "
+        "debugging, refactoring and reviews. Use when Luna or Terra is insufficient."
     ),
     "astra": (
         "Only 3D/spatial graphics, computer use/visual desktop interaction or heavy "
@@ -75,7 +78,7 @@ QUESTIONS = {
         "instructions": (
             "Minimize total task cost including corrections and clarification turns. "
             "Choose sufficient capability for remaining work. "
-            "Default to Sol; use Luna 6 for clearly simple work and Astra only for specialist/heavy work. "
+            "Use Luna for simple work, Terra for bounded work, Sol otherwise; Astra only for specialist/heavy work. "
             "Use cache_state model state, read_pct, age_s and context_k as reprocessing-cost "
             "evidence. Keep a sufficient last model, especially with large context; switch "
             "when capability demands it. hot means a real read; warming only recent success. "
@@ -194,7 +197,7 @@ def decision_from_answers(answers):
         gate = "policy_cap"
         if EFFORTS.index(effort) < EFFORTS.index("xhigh"):
             effort = "xhigh"
-    elif selected_model == LUNA and (model_conf is None or model_conf < 0.90 or
+    elif selected_model in (LUNA, TERRA) and (model_conf is None or model_conf < 0.90 or
                                      astra_conf is None or astra_conf < 0.90):
         selected_model = SOL
         gate = "confidence_hold"

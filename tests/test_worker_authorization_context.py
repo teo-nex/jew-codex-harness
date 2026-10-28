@@ -33,6 +33,19 @@ NATIVE = load_module("worker_authorization_native", "integrations/workers/native
 
 
 class WorkerAuthorizationContextTests(unittest.TestCase):
+    def test_terra61_worker_command_preserves_exact_model_and_effort(self):
+        self.assertIn("gpt-6.1-terra", NATIVE.NATIVE_WORKER_MODELS)
+        profile = self.root / "lean-profile"
+        (profile / ".codex").mkdir(parents=True)
+        (profile / ".codex/config.toml").write_text("", encoding="utf-8")
+        task = {"worker_model": "gpt-6.1-terra", "worker_effort": "medium",
+                "question_only": True, "goal": "Return a marker", "cwd": str(self.cwd)}
+        with mock.patch.object(QUICK.Path, "home", return_value=profile):
+            command = QUICK.command(task)
+        self.assertEqual(command[command.index("-m") + 1], "gpt-6.1-terra")
+        self.assertIn('model_reasoning_effort="medium"', command)
+        self.assertIn("agents.enabled=false", command)
+
     def test_retired_native_worker_models_are_rejected_before_ui_access(self):
         bridge = mock.Mock()
         for model in ("gpt-5.6-luna", "gpt-5.6-terra"):
