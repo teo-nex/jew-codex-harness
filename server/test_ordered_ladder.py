@@ -27,6 +27,39 @@ class OrderedLadderTests(unittest.TestCase):
             self.assertEqual(ladder.native_route(jev.TERRA, effort)["model"], "gpt-6.1-terra")
             self.assertEqual(plus_model(jev.TERRA, effort), "gpt-6.1-terra")
 
+    def test_missing_terra_does_not_disable_healthy_primary_models(self):
+        for mapped in (False, True):
+            primary = ({"id": "primary", "models": {m: "gateway/" + m for m in NATIVE_MODELS}}
+                       if mapped else {"id": "primary", "transport": "native"})
+            ladder = Ladder({"providers": [primary, {"id": "backup", "model": "backup"}]}, self.path)
+            with self.subTest(mapped=mapped), mock.patch("provider_ladder.time.time", return_value=1000):
+                terra = ladder.route("original", jev.TERRA, "medium")
+                self.assertTrue(ladder.advance("original", terra, "model_unavailable", cooldown_seconds=60))
+                for scope in ("original", "new-thread"):
+                    for model in (jev.SOL, jev.LUNA):
+                        healthy = ladder.route(scope, model, "medium")
+                        self.assertEqual(healthy["stage"], "primary")
+                        self.assertTrue(ladder.note_success(scope, healthy))
+                self.assertEqual(ladder.route("original", jev.TERRA, "medium")["stage"], "backup")
+                self.assertEqual(ladder.route("new-thread", jev.TERRA, "medium")["stage"], "backup")
+            with mock.patch("provider_ladder.time.time", return_value=1061):
+                for scope in ("original", "new-thread"):
+                    self.assertEqual(ladder.route(scope, jev.TERRA, "medium")["stage"], "primary")
+            self.path.unlink()
+
+    def test_mapped_account_quota_still_applies_across_models(self):
+        ladder = Ladder({"providers": [
+            {"id": "primary", "models": {m: "gateway/" + m for m in NATIVE_MODELS},
+             "connection_ids": ["account"]},
+            {"id": "backup", "model": "backup"}]}, self.path)
+        with mock.patch("provider_ladder.time.time", return_value=1000):
+            terra = ladder.route("original", jev.TERRA, "medium")
+            self.assertTrue(ladder.advance("original", terra, "quota", reset_at=1060))
+            for scope in ("original", "new-thread"):
+                self.assertEqual(ladder.route(scope, jev.SOL, "medium")["stage"], "backup")
+        with mock.patch("provider_ladder.time.time", return_value=1061):
+            self.assertEqual(ladder.route("original", jev.SOL, "medium")["stage"], "primary")
+
     def test_pre_terra_mapping_skips_unmapped_tier_without_inventing_alias(self):
         models = {m: "gateway/" + m for m in NATIVE_MODELS if m != jev.TERRA}
         config = {"providers": [{"id": "mapped", "models": models},
@@ -194,11 +227,11 @@ class OrderedLadderTests(unittest.TestCase):
                  {"resume_route": [1, 9]}, {"resume_route": [0, 0]}]
         for invalid in cases:
             with self.subTest(invalid=invalid):
-                self.path.write_text(json.dumps({"thread": {**initial, **invalid}}))
+                self.path.write_text(json.dumps({ladder._ordered_scope("thread", jev.SOL): {**initial, **invalid}}))
                 with self.assertRaises(ValueError):
                     ladder.route("thread", "gpt-6.1-sol", "high")
         for circuit in ([], {"config_hash": ladder.fingerprint, "until": "tomorrow"}):
-            self.path.write_text(json.dumps({"thread": initial, "_ordered_primary_circuit": circuit}))
+            self.path.write_text(json.dumps({ladder._ordered_scope("thread", jev.SOL): initial, "_ordered_primary_circuit": circuit}))
             with self.assertRaises(ValueError):
                 ladder.route("thread", "gpt-6.1-sol", "high")
 

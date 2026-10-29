@@ -359,10 +359,10 @@ class Ladder:
                     for reason in (None, "model_unavailable")), default=0)
 
     def _ordered_scope(self, scope, tier):
-        # A configuration gap is tier-specific, not a failure of the provider.
-        # Keep that tier's cursor separate so skipping a pre-Terra mapping
-        # cannot strand Sol/Luna on its fallback. Cooldowns remain shared.
-        if any(not self._supports_tier(provider, tier) for provider in self.providers):
+        # Missing mappings and model-specific failures must not move another
+        # tier's cursor. Shared account cooldowns still apply across tiers.
+        if any("models" in provider or (provider["transport"] == "native" and "model" not in provider)
+               for provider in self.providers):
             identity = json.dumps([scope, tier], ensure_ascii=True).encode()
             return "_tier_scope:" + hashlib.sha256(identity).hexdigest()
         return scope
@@ -393,6 +393,12 @@ class Ladder:
             until = circuit.get("until", 0) if circuit.get("config_hash") == self.fingerprint else 0
             if type(until) not in (int, float) or not math.isfinite(until):
                 raise ValueError("Invalid ordered provider cooldown")
+            # Use the actual model/account cooldowns, including old persisted
+            # state. The last primary circuit may belong to another model, or
+            # have been cleared by that model's successful request.
+            entries = self._cooldowns(state)
+            until = min(self._slot_until(entries, self._ordered_choice(0, slot, tier, effort))
+                        for slot in range(max(1, len(self.providers[0].get("connection_ids", [])))))
             if recover_primary and index > 0 and retry_at is not None and now >= retry_at and now >= until:
                 thread["resume_route"] = (index, account)
                 index = account = 0
@@ -400,7 +406,6 @@ class Ladder:
             elif index == 0 and now < until:
                 index, account = thread.pop("resume_route", (1, 0))
                 thread["primary_retry_at"] = until
-            entries = self._cooldowns(state)
             if index == len(self.providers) and recover_primary:
                 # Retry any recovered route after complete exhaustion, not only
                 # the first provider (which may have a much longer auth cooldown).
