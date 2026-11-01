@@ -80,6 +80,10 @@ def _run_cli(command: str, profile: Path, key: Path, port: int, env: dict[str, s
     argv = [sys.executable, "-m", "harness.cli", "--codex-home", str(profile),
             "--jev-provider", "typesafe", "--jev-key-file", str(key),
             "--port", str(port), command, *extra]
+    if os.name == "nt":
+        # Exercise the documented entry point rather than bypass its Python
+        # discovery. Respect the runner's configured script execution policy.
+        argv = ["powershell", "-NoProfile", "-File", str(REPO / "install.ps1"), *argv[3:]]
     completed = subprocess.run(argv, cwd=REPO, env=env, text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                timeout=timeout, check=False)
