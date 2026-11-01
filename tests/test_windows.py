@@ -7,6 +7,17 @@ from harness.platforms import windows
 
 
 class WindowsServiceTests(unittest.TestCase):
+    def test_oem_task_error_cannot_crash_ansi_reader_thread(self):
+        raw = bytes.fromhex("8e9888818a803a208da520e3a4a0a5e2e1ef")
+        with self.assertRaises(UnicodeDecodeError):
+            raw.decode("cp1251")
+        self.assertTrue(windows._native_text(raw, "cp866").startswith("ОШИБКА:"))
+
+    def test_task_xml_preserves_cyrillic_paths_and_accepts_utf16_bom(self):
+        xml = '<?xml version="1.0" encoding="UTF-16"?><Task><Path>C:\\Юзер</Path></Task>'
+        self.assertEqual(windows._native_text(xml.encode("cp866"), "cp866"), xml)
+        self.assertEqual(windows._native_text(xml.encode("utf-16")), xml)
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

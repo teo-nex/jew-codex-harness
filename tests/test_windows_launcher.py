@@ -13,6 +13,16 @@ REPO = Path(__file__).resolve().parents[1]
 
 @unittest.skipUnless(os.name == "nt", "requires Windows PowerShell")
 class WindowsLauncherTests(unittest.TestCase):
+    entrypoint = "install.ps1"
+
+    @classmethod
+    def setUpClass(cls):
+        if cls.entrypoint == "install.ps1":
+            result = subprocess.run(["powershell", "-NoProfile", "-Command", "Get-ExecutionPolicy"],
+                                    capture_output=True, text=True, timeout=15)
+            if result.stdout.strip() in ("Restricted", "AllSigned"):
+                raise unittest.SkipTest("script execution disabled; install.cmd is tested separately")
+
     def run_launcher(self, commands, *args):
         with tempfile.TemporaryDirectory(prefix="jev launcher ") as directory:
             root = Path(directory)
@@ -20,8 +30,10 @@ class WindowsLauncherTests(unittest.TestCase):
                 (root / (name + ".cmd")).write_text("@echo off\n" + body + "\n", encoding="utf-8")
             env = {**os.environ, "PATH": str(root), "PYLAUNCHER_ALLOW_INSTALL": ""}
             powershell = Path(os.environ["SystemRoot"]) / "System32/WindowsPowerShell/v1.0/powershell.exe"
+            command = ([str(powershell), "-NoProfile", "-File", str(REPO / self.entrypoint), *args]
+                       if self.entrypoint.endswith(".ps1") else [str(REPO / self.entrypoint), *args])
             return subprocess.run(
-                [str(powershell), "-NoProfile", "-File", str(REPO / "install.ps1"), *args],
+                command,
                 cwd=root, env=env, capture_output=True, text=True, timeout=30,
             )
 
@@ -60,5 +72,16 @@ class WindowsLauncherTests(unittest.TestCase):
 
     def test_missing_python_has_actionable_error(self):
         result = self.run_launcher({}, "--help")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Python 3.11+ is required", result.stderr)
+
+
+class WindowsCmdLauncherTests(WindowsLauncherTests):
+    entrypoint = "install.cmd"
+
+    def test_old_py_default_falls_back_to_explicit_version(self):
+        # The cmd entry point diagnoses an unsupported default rather than
+        # guessing which version the operator wants to select.
+        result = self.run_launcher({"py": "exit /b 3"}, "--help")
         self.assertNotEqual(result.returncode, 0)
         self.assertIn("Python 3.11+ is required", result.stderr)

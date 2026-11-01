@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- Windows installation discovers an available Python 3.11+ instead of requiring
+  the optional `py` launcher. The documented `install.cmd` entry point and
+  internal bootstrap work without changing PowerShell execution policy;
+  constrained language remains unsupported. Windows install smoke now uses
+  the public entry point, with regressions for launcher discovery and exit codes.
+- Windows Task Scheduler output uses the OEM code page (including Russian
+  CP866), with UTF-16 BOM detection, instead of the ANSI locale encoding.
+
 ## v0.1.0-alpha.1 — 2026-10-26
 
 Experimental source release for the Codex adapter on macOS, Linux and Windows.

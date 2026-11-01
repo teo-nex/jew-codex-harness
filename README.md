@@ -71,8 +71,12 @@ On Windows, in PowerShell:
 ```powershell
 git clone https://github.com/teo-nex/jew-codex-harness.git
 Set-Location jew-codex-harness
-.\install.ps1 onboard
+.\install.cmd onboard
 ```
+
+The Windows `.cmd` entry point also works with the default Restricted PowerShell
+execution policy; it does not change that policy. `install.ps1` remains available
+where script execution is already enabled.
 
 The wizard asks for a fresh profile path, whether your Jev key is from TypeSafe
 or OpenRouter, and whether to use an existing OmniRoute gateway. For OmniRoute,

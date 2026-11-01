@@ -76,7 +76,7 @@ def plan_service(repo: Path, codex_home: Path, state_dir: Path, env: dict[str, s
     definition = state_dir / "windows-task.xml"
     if os.name == "nt":
         identity = subprocess.run(["whoami", "/user", "/fo", "csv", "/nh"],
-                                  capture_output=True, text=True, check=True)
+                                  capture_output=True, text=True, encoding="oem", errors="replace", check=True)
         owner_sid = next((cell.strip().strip('"') for row in csv.reader(
             io.StringIO(identity.stdout)) for cell in row if cell.strip().startswith("S-1-")), None)
         if not owner_sid:
@@ -90,9 +90,22 @@ def plan_service(repo: Path, codex_home: Path, state_dir: Path, env: dict[str, s
             "wrapper_path": str(state_dir / "run-router.py"), "owner_sid": owner_sid}
 
 
+def _native_text(value, encoding=None):
+    if not isinstance(value, bytes):
+        return value
+    # schtasks uses the OEM code page, not Python's ANSI locale encoding.
+    # Some versions emit actual UTF-16, others only declare it in the XML.
+    if value.startswith((b'\xff\xfe', b'\xfe\xff')):
+        return value.decode("utf-16", errors="replace")
+    return value.decode(encoding or ("oem" if os.name == "nt" else "utf-8"), errors="replace")
+
+
 def _query_xml():
-    return subprocess.run(["schtasks", "/Query", "/TN", SERVICE_ID, "/XML"],
-                          capture_output=True, text=True, check=False)
+    result = subprocess.run(["schtasks", "/Query", "/TN", SERVICE_ID, "/XML"],
+                            capture_output=True, check=False)
+    result.stdout = _native_text(result.stdout)
+    result.stderr = _native_text(result.stderr)
+    return result
 
 
 def _owned_xml(xml, plan=None, observed_run_level=None):
@@ -149,7 +162,7 @@ def _task_run_level(task_name=SERVICE_ID):
         result = subprocess.run(
             ["powershell", "-NoProfile", "-NonInteractive", "-Command", script],
             env={**os.environ, "JEV_TASK_NAME": task_name},
-            capture_output=True, text=True, timeout=45, check=False)
+            capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=45, check=False)
         return result.stdout.strip() if result.returncode == 0 else None
     except (OSError, subprocess.TimeoutExpired):
         return None

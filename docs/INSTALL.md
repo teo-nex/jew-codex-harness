@@ -21,7 +21,7 @@ Interactive first install on an otherwise free host:
 ./install.sh onboard
 ```
 
-On Windows, use `./install.ps1 onboard` in PowerShell. The wizard asks for a
+On Windows, use `./install.cmd onboard` in PowerShell. The wizard asks for a
 fresh Codex profile, `typesafe` or `openrouter` for Jev, the hidden decision
 API key, and whether to use an **existing** OmniRoute gateway. It never
 installs OmniRoute or creates its accounts. Selecting OmniRoute requires

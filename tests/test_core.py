@@ -142,6 +142,16 @@ class InstallCoreTests(unittest.TestCase):
         self.assertEqual(env["MODEL_ROUTER_TARGET"], "codex")
         self.assertTrue(Path(env["MODEL_ROUTER_STATE_DIR"]).is_relative_to(Path(env["CODEX_HOME"])))
 
+    def test_windows_installer_keeps_policy_and_language_restrictions(self):
+        for prepare_only in (False, True):
+            command = core._windows_installer_command(Path("C:/owner's checkout"), prepare_only=prepare_only)
+            self.assertIn("-Command", command)
+            self.assertNotIn("-File", command)
+            self.assertNotIn("-ExecutionPolicy", command)
+            self.assertIn("FullLanguage", command[-1])
+            self.assertIn("owner''s checkout", command[-1])
+            self.assertEqual("-PrepareOnly" in command[-1], prepare_only)
+
     def test_service_environment_selects_the_profile_on_every_platform(self):
         from harness.platforms import linux, macos, windows
         from server.local_runtime import resolve_runtime_paths

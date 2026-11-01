@@ -83,7 +83,7 @@ def _run_cli(command: str, profile: Path, key: Path, port: int, env: dict[str, s
     if os.name == "nt":
         # Exercise the documented entry point rather than bypass its Python
         # discovery. Respect the runner's configured script execution policy.
-        argv = ["powershell", "-NoProfile", "-File", str(REPO / "install.ps1"), *argv[3:]]
+        argv = [str(REPO / "install.cmd"), *argv[3:]]
     completed = subprocess.run(argv, cwd=REPO, env=env, text=True,
                                stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
                                timeout=timeout, check=False)

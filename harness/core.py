@@ -269,6 +269,20 @@ def _router_environment(home: Path, state: Path | None = None) -> dict[str, str]
             "MODEL_ROUTER_STATE_DIR": str(state), "CODEX_ROUTER_STATE_DIR": str(state)}
 
 
+def _windows_installer_command(repo: Path, *, prepare_only: bool = False) -> list[str]:
+    # Execute the explicitly requested checkout's installer as commands. This
+    # does not set ExecutionPolicy, unblock downloaded files, or relax language
+    # restrictions. Restricted permits commands but blocks -File entry points.
+    script_path = str(repo / "router/install.ps1").replace("'", "''")
+    arguments = ("-CheckoutInstall -PrepareOnly" if prepare_only else
+                 "-CheckoutInstall -Target codex -NoProvider -NoDiscovery -NoTray")
+    command = ("$ErrorActionPreference='Stop'; "
+               "if ($ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') "
+               "{ throw 'Router installation requires PowerShell FullLanguage' }; "
+               f"& ([ScriptBlock]::Create([IO.File]::ReadAllText('{script_path}'))) {arguments}")
+    return ["powershell", "-NoProfile", "-NonInteractive", "-Command", command]
+
+
 def prepare(repo: Path, codex_home: Path, os_name: str | None = None) -> dict:
     """Prepare dependencies in an isolated temporary profile, never live state."""
     import tempfile
@@ -278,8 +292,7 @@ def prepare(repo: Path, codex_home: Path, os_name: str | None = None) -> dict:
     with tempfile.TemporaryDirectory(prefix="jev-prepare-") as scratch:
         env = _router_environment(Path(scratch), Path(scratch) / "router")
         if (os_name or sys.platform) in ("windows", "win32"):
-            command = ["powershell", "-NoProfile", "-File", str(repo / "router/install.ps1"),
-                       "-CheckoutInstall", "-PrepareOnly"]
+            command = _windows_installer_command(repo, prepare_only=True)
         else:
             command = [str(repo / "router/bin/install"), "--prepare-only"]
         subprocess.run(command, cwd=repo / "router", env=env, check=True)
@@ -734,8 +747,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
     _journal(state, journal, previous)
     env = _router_environment(home)
     if (os_name or sys.platform) in ("windows", "win32"):
-        command = ["powershell", "-NoProfile", "-File", str(repo / "router/install.ps1"),
-                   "-CheckoutInstall", "-Target", "codex", "-NoProvider", "-NoDiscovery", "-NoTray"]
+        command = _windows_installer_command(repo)
     else:
         command = [str(repo / "router/install.sh"), "--target", "codex", "--no-provider", "--no-discovery", "--no-tray"]
     subprocess.run(command, cwd=repo / "router", env=env, check=True)
