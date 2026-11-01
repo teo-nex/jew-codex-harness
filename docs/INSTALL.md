@@ -63,6 +63,14 @@ synthetic file in an ephemeral workspace and requires a matching hook receipt.
 File installation and service
 health do not prove the client loaded a hook.
 
+On native Windows, a fresh Codex profile also needs its own Agent sandbox
+onboarding before the file-edit check can pass. An existing login or a sandbox
+configured in another `CODEX_HOME` does not prove this new profile can write.
+If Codex reports `writing is blocked by read-only sandbox`, record the tool
+check as blocked and have the owner complete Codex's sandbox setup for this
+profile. The harness does not provision Windows sandbox accounts, change
+firewall rules, copy sandbox secrets, or disable sandboxing automatically.
+
 The installer bootstraps the router with credential discovery disabled. It leaves
 native ChatGPT session sharing pending: local install and service health do not
 prove that the native-only route can answer. After the account

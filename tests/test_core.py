@@ -267,6 +267,10 @@ class InstallCoreTests(unittest.TestCase):
         self.assertTrue(any("configure-auth.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("chatgpt-session.mjs" in " ".join(call.args[0]) for call in process.call_args_list))
         self.assertFalse(any("synthetic" in str(call) for call in process.call_args_list))
+        commands = [" ".join(call.args[0]) for call in process.call_args_list]
+        reload_index = next(i for i, command in enumerate(commands) if "reload-router.mjs" in command)
+        self.assertLess(next(i for i, command in enumerate(commands) if "configure-model.mjs" in command), reload_index)
+        self.assertLess(next(i for i, command in enumerate(commands) if "configure-auth.mjs" in command), reload_index)
         for call in process.call_args_list:
             self.assertEqual(Path(call.kwargs["env"]["MODEL_ROUTER_STATE_DIR"]).resolve(),
                              (self.home / "codex-router").resolve())
@@ -434,6 +438,21 @@ class InstallCoreTests(unittest.TestCase):
             self._installed("refresh-catalog.mjs")
         journal = json.loads((self.home / "jev-harness/journal.json").read_text())
         self.assertEqual(journal["phase"], "chatgpt_deferred")
+        self._installed()
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
+
+    def test_failed_router_reload_is_resumable_without_reconfiguring_provider(self):
+        with self.assertRaises(core.subprocess.CalledProcessError):
+            self._installed("reload-router.mjs")
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "picker_configured")
+        self._installed()
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
+
+    def test_resume_accepts_checkpoint_after_successful_router_reload(self):
+        with mock.patch.object(core, "merge_config", side_effect=RuntimeError("interrupted after reload")):
+            with self.assertRaisesRegex(RuntimeError, "interrupted after reload"):
+                self._installed()
+        self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "router_reloaded")
         self._installed()
         self.assertEqual(json.loads((self.home / "jev-harness/journal.json").read_text())["phase"], "complete")
 

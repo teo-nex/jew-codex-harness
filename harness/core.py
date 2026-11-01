@@ -467,7 +467,7 @@ def _read_journal(home: Path) -> dict:
             or data.get("repo") is None or data.get("service_id") is None
             or data.get("phase") not in {"started", "router_started", "router_ready", "provider_added",
                                          "provider_enabled", "model_configured", "auth_configured",
-                                         "chatgpt_deferred", "catalog_refreshed", "picker_configured",
+                                         "chatgpt_deferred", "catalog_refreshed", "picker_configured", "router_reloaded",
                                          "config_written", "hooks_written", "ladder_written",
                                          "ui_written", "skill_written", "agents_written",
                                          "service_pending", "service_installed", "manifest_written", "complete",
@@ -612,6 +612,7 @@ def _continue_install(ctx: dict, journal: dict, os_name: str | None) -> dict:
         ("chatgpt_deferred", lambda: None),
         ("catalog_refreshed", lambda: run(["node", str(repo / "router/src/refresh-catalog.mjs")])),
         ("picker_configured", lambda: run(["node", str(repo / "router/src/control.mjs"), "picker", "set", "jev/auto", "show"])),
+        ("router_reloaded", lambda: run(["node", str(repo / "server/reload-router.mjs")])),
         ("config_written", write_config),
         ("hooks_written", write_hooks),
         ("ladder_written", lambda: _atomic(state / "ladder-config.json", ctx["ladder"].read_bytes())
@@ -693,7 +694,7 @@ def install(repo: Path, codex_home: Path, ladder: Path, omni: Path, typesafe: Pa
         if saved["phase"] not in {"started", "router_started", "router_ready",
                                   "provider_added", "provider_enabled", "model_configured",
                                   "auth_configured", "chatgpt_deferred", "catalog_refreshed",
-                                  "picker_configured", "config_written", "hooks_written",
+                                  "picker_configured", "router_reloaded", "config_written", "hooks_written",
                                   "ladder_written", "ui_written", "skill_written",
                                   "agents_written", "service_pending", "service_installed", "manifest_written"}:
             raise InstallError("Existing journal cannot be continued; exact review required")

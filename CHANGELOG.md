@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Reload the owned idle base router after registering `jev/auto`, so a fresh
+  installation does not advertise a model that the running process cannot route.
+
 - Windows installation discovers an available Python 3.11+ instead of requiring
   the optional `py` launcher. The documented `install.cmd` entry point and
   internal bootstrap work without changing PowerShell execution policy;
