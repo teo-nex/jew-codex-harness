@@ -3,7 +3,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 import { writePrivateJson } from "./file-security.mjs";
-import { DISCOVERY_MODE_PATH } from "./paths.mjs";
+import { CODEX_HOME, STATE_DIR, DISCOVERY_MODE_PATH } from "./paths.mjs";
 
 // Credential discovery is every read of a secret the operator did not hand to
 // this process directly: provider credential files, the macOS Keychain, other
@@ -55,11 +55,13 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   const command = process.argv[2] || "status";
   if (command === "status") {
     process.stdout.write(
-      `${JSON.stringify({ discovery: discoveryDisabled() ? "disabled" : "enabled" })}\n`,
+      `${JSON.stringify({ codex_home: CODEX_HOME, state_dir: STATE_DIR,
+        discovery: discoveryDisabled() ? "disabled" : "enabled" })}\n`,
     );
   } else if (command === "set" && ["enabled", "disabled"].includes(process.argv[3])) {
     writeDiscoveryMode(process.argv[3] === "disabled");
-    process.stdout.write(`${JSON.stringify({ discovery: process.argv[3] })}\n`);
+    process.stdout.write(`${JSON.stringify({ codex_home: CODEX_HOME, state_dir: STATE_DIR,
+      discovery: discoveryDisabled() ? "disabled" : "enabled" })}\n`);
   } else {
     console.error("Usage: discovery-mode.mjs status|set enabled|disabled");
     process.exit(2);

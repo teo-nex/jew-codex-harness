@@ -30,6 +30,14 @@ service never pulls or updates another repository by itself.
 
 ## Maintained fixes
 
+- Session/discovery status identifies the actual Codex profile and router state.
+  The harness provides an ownership-checked, profile-bound session setup command
+  with explicit sharing consent and child-only environment overrides.
+
+- Auth diagnostics distinguish a typed local Jev rejection from a downstream
+  native-session refusal, including nested gateway envelopes. Unknown generic
+  401/403 errors do not assert that the Jev key is wrong or echo private details.
+
 - Gateway bootstrap selects a Python compatible with its pinned dependencies
   instead of trusting the Windows launcher's newest default. Both installers
   check an existing venv before reuse; an unsupported default can fall back to

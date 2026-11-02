@@ -6,6 +6,8 @@ import {
   setNativeSessionSharingEnabled,
 } from "./codex-native-session.mjs";
 import { refreshTargetPickerIfInstalled } from "./target-integration.mjs";
+import { CODEX_HOME, STATE_DIR } from "./paths.mjs";
+import { discoveryDisabled } from "./discovery-mode.mjs";
 
 function usage() {
   return "Usage: chatgpt-session enable|disable|status [--json]";
@@ -14,6 +16,14 @@ function usage() {
 function safeStatus() {
   const status = nativeSessionStatus();
   return {
+    codex_home: CODEX_HOME,
+    state_dir: STATE_DIR,
+    discovery: discoveryDisabled() ? "disabled" : "enabled",
+    discovery_override: process.env.CODEX_ROUTER_NO_DISCOVERY === undefined ? null
+      : process.env.CODEX_ROUTER_NO_DISCOVERY === "1" ? "disabled"
+        : process.env.CODEX_ROUTER_NO_DISCOVERY === "0" ? "enabled" : "unrecognized",
+    sharing_override: process.env.CODEX_ROUTER_NATIVE_SESSION_FALLBACK === undefined ? null
+      : process.env.CODEX_ROUTER_NATIVE_SESSION_FALLBACK === "1" ? "enabled" : "disabled",
     sharing: status.sharingEnabled ? "enabled" : "disabled",
     session: status.usable ? "usable" : status.expired ? "expired" : "unavailable",
     present: status.present,
@@ -32,6 +42,7 @@ function printStatus(status, { json = false } = {}) {
     process.stdout.write(`${JSON.stringify(status)}\n`);
     return;
   }
+  process.stdout.write(`Codex profile: ${JSON.stringify(status.codex_home)}\nRouter state: ${JSON.stringify(status.state_dir)}\nDiscovery: ${status.discovery}\n`);
   if (status.sharing === "enabled") {
     if (status.session !== "usable") {
       process.stdout.write(

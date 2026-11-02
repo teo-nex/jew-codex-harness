@@ -16,6 +16,7 @@ from . import routes
 from . import catalog
 from . import explain
 from . import acceptance
+from . import session
 
 
 def parser() -> argparse.ArgumentParser:
@@ -30,6 +31,10 @@ def parser() -> argparse.ArgumentParser:
                      type=Path)
     app.add_argument("--port", type=int, default=4319)
     sub = app.add_subparsers(dest="command", required=True)
+    native_session = sub.add_parser("session", help="inspect or explicitly configure this profile's ChatGPT session sharing")
+    native_session.add_argument("session_action", choices=("status", "enable", "disable"))
+    native_session.add_argument("--allow-sharing", action="store_true",
+                                help="owner authorizes discovery and ChatGPT session use by other local router clients")
     sub.add_parser("catalog", help="read advertised models from the existing OmniRoute gateway")
     diagnostic = sub.add_parser("explain", help="sanitized latest request routing evidence")
     diagnostic.add_argument("--scope", help="optional logged cache-scope hash")
@@ -72,7 +77,11 @@ def main(argv: list[str] | None = None, repo: Path | None = None) -> int:
             args.typesafe_key_file = Path(os.environ[key_name])
     repo = repo or Path(__file__).resolve().parents[1]
     try:
-        if args.command == "acceptance":
+        if args.command == "session":
+            result = session.manage(repo, args.codex_home, args.session_action,
+                                    allow_sharing=args.allow_sharing)
+            code = 0
+        elif args.command == "acceptance":
             result = acceptance.run(repo, args.codex_home, live=args.live, manual_model=args.manual_model,
                                     gateway_model=args.gateway_model, auth=args.omniroute_auth_file,
                                     offline_recovery=args.offline_recovery)

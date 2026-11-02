@@ -49,6 +49,16 @@ class OnboardTests(unittest.TestCase):
         self.assertEqual(result["jev_provider"], "openrouter")
         self.assertEqual(result["ladder_mode"], "native")
         self.assertIn("CODEX_HOME", result["launch_command"])
+        self.assertIn("MODEL_ROUTER_STATE_DIR", result["launch_command"])
+        self.assertIn("CODEX_ROUTER_STATE_DIR", result["launch_command"])
+        self.assertIn("--codex-home", result["session_status_command"])
+        self.assertIn("session", result["session_status_command"])
+        steps = result["next_steps"]
+        self.assertIn("login", steps[0])
+        self.assertIn("session", steps[1])
+        self.assertIn("--allow-sharing", steps[2])
+        self.assertIn("owner approves", steps[2])
+        self.assertIn("/hooks", steps[3])
         self.assertIn("--summary", result["report_command"])
         self.assertEqual(path.read_text(), "synthetic-secret\n")
         if os.name != "nt":
@@ -85,6 +95,7 @@ class OnboardTests(unittest.TestCase):
                                  read=lambda _: next(answers), secret=lambda _: "fixture-key",
                                  key_root=self.key_root)
         self.assertEqual(result["ladder_mode"], "active")
+        self.assertNotIn("--allow-sharing", " ".join(result["next_steps"]))
         self.assertEqual(install.call_args.args[2:4], (ladder, omni))
 
     @unittest.skipIf(os.name == "nt", "symlink creation is not guaranteed for Windows CI users")

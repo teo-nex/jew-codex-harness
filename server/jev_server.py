@@ -2158,7 +2158,9 @@ class Handler(BaseHTTPRequestHandler):
             if not secret:
                 return self._json(503, {"error": {"message": "local credential not configured"}})
             if not authorized(self.headers.get("Authorization"), secret):
-                return self._json(401, {"error": {"message": "Unauthorized"}})
+                return self._json(401, {"error": {"type": "authentication_error",
+                                                "code": "jev_local_auth_required",
+                                                "message": "Unauthorized"}})
             # Browsers are not clients of this local server.
             if self.headers.get("Origin"):
                 return self._json(403, {"error": {"message": "browser origin not supported"}})

@@ -99,9 +99,20 @@ def _new_key_path(profile: Path, provider: str, root: Path | None = None) -> Pat
 
 
 def _launch_command(home: Path) -> str:
+    values = {"CODEX_HOME": str(home), "MODEL_ROUTER_STATE_DIR": str(home / "codex-router"),
+              "CODEX_ROUTER_STATE_DIR": str(home / "codex-router")}
     if os.name == "nt":
-        return "$env:CODEX_HOME = '" + str(home).replace("'", "''") + "'; codex"
-    return "CODEX_HOME=" + shlex.quote(str(home)) + " codex"
+        return "; ".join("$env:" + key + " = '" + value.replace("'", "''") + "'"
+                         for key, value in values.items()) + "; codex"
+    return " ".join(key + "=" + shlex.quote(value) for key, value in values.items()) + " codex"
+
+
+def _profile_command(repo: Path, home: Path, *args: str) -> str:
+    argv = [sys.executable, "-m", "harness.cli", "--codex-home", str(home), *args]
+    if os.name == "nt":
+        quote = lambda value: "'" + str(value).replace("'", "''") + "'"
+        return "Set-Location -LiteralPath " + quote(repo) + "; & " + " ".join(map(quote, argv))
+    return "cd -- " + shlex.quote(str(repo)) + " && " + shlex.join(argv)
 
 
 def _report_command(repo: Path, home: Path) -> str:
@@ -196,6 +207,11 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
                           ("files", "client_config", "model_preserved", "service_health"))
         decision = (live_verify.verify_decision(home) if local_ready else
                     {"ok": False, "status": "not_run", "reason": "local verification failed"})
+        session_steps = (["Sign in to this profile if needed: " + _launch_command(home) + " login",
+                          "Inspect this profile's session: " + _profile_command(repo, home, "session", "status"),
+                          "After the owner approves other local router clients using this ChatGPT login, run: "
+                          + _profile_command(repo, home, "session", "enable", "--allow-sharing")]
+                         if external != "yes" else [])
         return {"installed": installed.get("installed") is True,
                 "ready": False, "status": ("hook_trust_pending" if decision["ok"] else
                                            "jev_decision_failed" if local_ready else "local_verification_failed"),
@@ -205,10 +221,11 @@ def run(repo: Path, codex_home: Path, port: int, *, default_provider: str = "typ
                 "provider_order": ([p["id"] for p in generated_config["providers"]]
                                    if generated_config is not None else None),
                 "launch_command": _launch_command(home),
+                "session_status_command": _profile_command(repo, home, "session", "status"),
                 "report_command": _report_command(repo, home),
                 "key_file": str(key_file), "dry_run": dry_run,
                 "local_verify": verified, "jev_decision": decision,
-                "next_steps": ["Review and trust Jev hooks with /hooks in a fresh Codex session",
+                "next_steps": session_steps + ["Review and trust Jev hooks with /hooks in a fresh Codex session",
                                "Run verify --live --manual-model YOUR_MODEL after hook trust",
                                "After observed calls, run report_command to see the API-equivalent table",
                                "Complete Browser/Computer/Compact capability checks in the real client"]}

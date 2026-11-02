@@ -90,6 +90,11 @@ test(
       });
       assert.equal(result.status, 0, result.stderr);
       assert.deepEqual(JSON.parse(result.stdout), {
+        codex_home: process.env.CODEX_HOME,
+        state_dir: process.env.MODEL_ROUTER_STATE_DIR,
+        discovery: "enabled",
+        discovery_override: null,
+        sharing_override: null,
         sharing: "disabled",
         session: "usable",
         present: true,

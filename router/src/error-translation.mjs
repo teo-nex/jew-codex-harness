@@ -50,6 +50,33 @@ function parseUpstreamError(bodyText) {
   }
 }
 
+// Preserve only known diagnostic codes, including JSON inside LiteLLM's
+// exception message. Never copy the original envelope into an auth response.
+function localAuthFailureCode(bodyText) {
+  let text = typeof bodyText === "string" ? bodyText : "";
+  const codes = new Set(["native_session_required", "jev_local_auth_required"]);
+  for (let depth = 0; depth < 5 && text.length <= 64 * 1024; depth += 1) {
+    try {
+      const parsed = JSON.parse(text);
+      const code = [parsed?.error?.code, parsed?.error?.type].find(value => codes.has(value));
+      if (code) return code;
+      text = parseUpstreamError(text).message;
+    } catch {
+      // The next iteration can parse a stripped exception/bytes wrapper.
+    }
+    for (const pattern of ROUTING_NOISE) text = text.replace(pattern, "");
+    let previous;
+    do {
+      previous = text;
+      for (const pattern of WRAPPER_PREFIXES) text = text.replace(pattern, "");
+    } while (text !== previous);
+    const bytes = /^b(['"])([\s\S]*)\1$/.exec(text.trim());
+    if (bytes) text = bytes[2];
+    text = text.trim();
+  }
+  return undefined;
+}
+
 // LiteLLM sometimes leaves the provider JSON as the remainder, either as a
 // bare object or as a Python bytes literal (`b'{...}'` / `b"{...}"`). Unwrap
 // that before DETAIL_LIMIT so a nested Console Go sentence is not truncated
@@ -251,6 +278,7 @@ function describeFailure({
   providerName,
   providerKind,
   providerAuthMode,
+  providerGeneric,
   retryAfterSeconds,
 }) {
   // Ahead of both the quota and the credential branches: an entitlement
@@ -284,6 +312,12 @@ function describeFailure({
       return {
         type: "authentication_error",
         message: `${providerName} serves ${modelName} anonymously, so there is no stored credential to refresh. ${providerName} rejected this request on its free route; the free catalog and limits change without notice, so retry later or switch models.`,
+      };
+    }
+    if (providerGeneric) {
+      return {
+        type: "authentication_error",
+        message: `Authorization failed in the route serving ${modelName}. Check the selected profile, local transport and downstream session; this response does not identify which credential or hop was rejected.`,
       };
     }
     return {
@@ -335,8 +369,20 @@ export function translateGatewayError({
   providerName,
   providerKind,
   providerAuthMode,
+  providerGeneric = false,
   retryAfterSeconds,
 }) {
+  const authFailure = (status === 401 || status === 403) && localAuthFailureCode(bodyText);
+  if (authFailure) {
+    return { error: {
+      type: "authentication_error",
+      code: authFailure,
+      param: null,
+      message: authFailure === "native_session_required"
+        ? "The downstream native route has no usable ChatGPT/Codex session. Check login, discovery and session sharing for the installed profile with `python -m harness.cli --codex-home PROFILE session status`."
+        : "Jev rejected the local transport credential before routing. Check that the Jev service and provider credential use the same installed profile and router state; do not replace the router internal key.",
+    } };
+  }
   // LiteLLM raises this locally while converting stored Responses tool calls
   // into Anthropic `tool_use.input`, before any provider request is sent.
   // Naming the provider here sent operators looking at the wrong hop and let
@@ -371,9 +417,11 @@ export function translateGatewayError({
     providerName,
     providerKind,
     providerAuthMode,
+    providerGeneric,
     retryAfterSeconds,
   });
-  const suffix = detail ? ` (HTTP ${status}: ${detail})` : ` (HTTP ${status})`;
+  const safeDetail = providerGeneric && (status === 401 || status === 403) ? "" : detail;
+  const suffix = safeDetail ? ` (HTTP ${status}: ${safeDetail})` : ` (HTTP ${status})`;
   return {
     error: {
       message: `${failure.message}${suffix}`,

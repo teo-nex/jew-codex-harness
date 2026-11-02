@@ -24,7 +24,8 @@ class EmbeddedRouterLayout(unittest.TestCase):
         installer = (ROOT / "install.sh").read_text()
         windows = (ROOT / "install.ps1").read_text()
         self.assertIn("python3 -m harness.cli", installer)
-        self.assertIn("py -3 -m harness.cli", windows)
+        self.assertIn("$Python = Find-HarnessPython", windows)
+        self.assertIn("& $Python -m harness.cli @args", windows)
         self.assertNotIn("--take-over-managed-router", installer)
         self.assertNotIn("git clone", installer)
 

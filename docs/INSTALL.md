@@ -74,12 +74,31 @@ firewall rules, copy sandbox secrets, or disable sandboxing automatically.
 The installer bootstraps the router with credential discovery disabled. It leaves
 native ChatGPT session sharing pending: local install and service health do not
 prove that the native-only route can answer. After the account
-owner signs in with `CODEX_HOME` set to the new profile, explicitly enable
-discovery and sharing with `node router/src/discovery-mode.mjs set enabled` and
-`node router/src/chatgpt-session.mjs enable`, using that same `CODEX_HOME` and
-`CODEX_ROUTER_STATE_DIR`. This permits the router to read the Codex session;
-review that access before opting in. Then run `verify --live` in the selected
-profile. Discovery changes also apply to the running router; restarting the
+owner signs in with `CODEX_HOME` set to the new profile, use the profile-bound
+commands below from the installed checkout, with the Python used by the harness
+(`python3` on macOS/Linux, or the discovered Python on Windows):
+
+```sh
+python -m harness.cli --codex-home PROFILE session status
+# After the owner approves other local router clients using this ChatGPT login:
+python -m harness.cli --codex-home PROFILE session enable --allow-sharing
+python -m harness.cli --codex-home PROFILE verify --live
+```
+
+Replace `PROFILE` with the installed profile path (quote paths containing spaces).
+`session enable --allow-sharing` enables credential discovery and session sharing
+only in that installation's state. It overrides stale parent state/auth-path
+aliases in its child process, validates the installation manifest, and does not
+change global environment variables. A forced-off discovery/sharing policy is
+reported instead of bypassed. If login is unavailable, discovery stays enabled
+but sharing consent is not created; sign in to that profile and repeat the command.
+`session disable` revokes sharing without signing out or disabling discovery.
+Status prints the actual profile/state and never credentials. Bare Node session
+and discovery commands also identify their paths, but still follow their calling
+shell's environment; prefer the profile-bound harness commands.
+
+Then complete the hook and manual-model checks in the selected profile.
+Discovery changes also apply to the running router; restarting the
 Codex app alone does not change the router's profile or credentials. The app
 and router must use the same intended `CODEX_HOME`. In signed routing, Codex
 supplies its own login bearer; session sharing is a separate opt-in that lets

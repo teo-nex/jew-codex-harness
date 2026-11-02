@@ -163,6 +163,41 @@ test("a 401 points at credentials and setup", () => {
   assert.equal(payload.error.type, "authentication_error");
 });
 
+test("typed native-session refusals survive nested LiteLLM errors without blaming the Jev key", () => {
+  const inner = { error: { type: "native_session_required", message: "private-fixture-token" } };
+  for (const bodyText of [JSON.stringify(inner), JSON.stringify({ error: {
+    message: `litellm.AuthenticationError: AuthenticationError: OpenAIException - ${JSON.stringify(inner)} Received Model Group=jev-auto`,
+  } })]) {
+    const payload = translateGatewayError({ status: 401, bodyText, providerGeneric: true,
+      modelName: "Jev Codex Router", providerName: "jev" });
+    assert.equal(payload.error.code, "native_session_required");
+    assert.match(payload.error.message, /downstream.*session/i);
+    assert.match(payload.error.message, /--codex-home PROFILE session status/);
+    assert.doesNotMatch(payload.error.message, /rejected the stored credentials|Re-run codex-router setup|private-fixture-token/);
+    assert.equal(gatewayErrorStatus({ status: 401, bodyText }), 401);
+  }
+});
+
+test("local Jev auth has its own diagnostic and does not suggest replacing the internal key", () => {
+  const payload = translateGatewayError({ status: 401, providerGeneric: true,
+    bodyText: JSON.stringify({ error: { code: "jev_local_auth_required", message: "private-fixture" } }),
+    modelName: "Jev Codex Router", providerName: "jev" });
+  assert.equal(payload.error.code, "jev_local_auth_required");
+  assert.match(payload.error.message, /local transport credential before routing/);
+  assert.doesNotMatch(payload.error.message, /private-fixture|Re-run codex-router setup/);
+});
+
+test("unknown generic proxy refusals identify uncertainty and do not leak arbitrary detail", () => {
+  const privateDetail = 'Unauthorized secret=fixture-token http://127.0.0.1/_codex-router/fixture-capability/v1';
+  for (const status of [401, 403]) {
+    const payload = translateGatewayError({ status, providerGeneric: true,
+      bodyText: JSON.stringify({ detail: privateDetail }), modelName: "Jev", providerName: "jev" });
+    assert.match(payload.error.message, /does not identify which credential or hop/);
+    assert.doesNotMatch(JSON.stringify(payload), /fixture-token|fixture-capability|stored credentials|Re-run codex-router setup/);
+    assert.equal(payload.error.code, String(status));
+  }
+});
+
 test("a 401 from an OAuth provider says sign in again, not re-run setup", () => {
   const payload = translateGatewayError({
     status: 401,

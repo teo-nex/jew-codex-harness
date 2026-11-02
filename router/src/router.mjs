@@ -3244,6 +3244,7 @@ async function handleRoutedCompaction(
           : provider?.ownedBy || provider?.displayName || servedRoute.provider,
       providerKind: provider?.kind,
       providerAuthMode: provider?.authMode,
+      providerGeneric: provider?.generic === true,
     });
     writeTranslatedGatewayError(response, translatedStatus, translatedError, {
       provider: servedRoute.provider,
@@ -4710,6 +4711,7 @@ async function handleResponses(request, response, requestUrl) {
             : provider?.ownedBy || provider?.displayName || route.provider,
         providerKind: provider?.kind,
         providerAuthMode: provider?.authMode,
+        providerGeneric: provider?.generic === true,
         retryAfterSeconds: retrySeconds,
       });
       writeTranslatedGatewayError(response, translatedStatus, translatedError, {

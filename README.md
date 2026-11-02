@@ -90,7 +90,10 @@ for non-interactive commands, protected files, and rollback.
 1. Open a fresh Codex session in the installed profile. Use `/hooks` to review
    and trust the new hooks.
 2. Sign in if needed. For native GPT routing, explicitly enable session sharing
-   for this profile as described in the [installation guide](docs/INSTALL.md).
+   for this profile as described in the [installation guide](docs/INSTALL.md):
+   `python -m harness.cli --codex-home PROFILE session status`, then, after owner
+   approval, `python -m harness.cli --codex-home PROFILE session enable --allow-sharing`.
+   Use the harness's Python and replace `PROFILE` with the installed path.
 3. Select `jev/auto` when you want automatic routing. Your previous default
    model is preserved, so the installer does not switch you to `jev/auto`.
 4. From the repository root, run

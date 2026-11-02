@@ -67,6 +67,14 @@ Codex Tool Use; Jev UI helpers and compact carry remain separate. Do not claim
 that every new session autoroutes unless the installed profile explicitly
 selects `jev/auto` and a fresh session proves it.
 
+For native routing, after login and owner approval, run the profile-bound
+`python -m harness.cli --codex-home PROFILE session status` and
+`session enable --allow-sharing` commands from the installed checkout. Use the
+same `--codex-home PROFILE` on both commands. The latter explicitly authorizes
+discovery and other local router clients using that profile's ChatGPT session.
+Do not run bare Node setup commands in an unverified default environment.
+Then review hooks and complete `verify --live`; local checks alone are insufficient.
+
 If the user asks for an existing-profile migration, first produce an exact
 owned-file/service diff and a reversible migration plan. Do not use a new
 profile, a second write mechanism, or another model call to bypass a hook
