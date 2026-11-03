@@ -161,6 +161,11 @@ Project policies, request budgets and failure cooldowns are described in
 - [Provider/model routing audit](docs/AUDIT-2026-10-05.md)
 - [Security policy](SECURITY.md) and [contributing guide](CONTRIBUTING.md)
 
+The guarded Jev coding workers implementation is included in the
+[XERJ Corpus Hub](https://hub.xerj.org/contributors/teo-nex) with author attribution.
+
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/teo-nex/badge.svg)](https://hub.xerj.org/contributors/teo-nex)
+
 The root project is [MIT licensed](LICENSE). The embedded router retains its
 own [MIT license](router/LICENSE) and [attribution](router/NOTICE.md). Keep
 API keys, OAuth files, provider state, and runtime logs out of Git.
